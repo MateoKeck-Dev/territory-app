@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Location from 'expo-location';
 
@@ -9,24 +9,29 @@ import {
   WALK_LOCATION_TASK,
   flushBufferedPoints,
   getTrackedDistanceMeters,
+  ingestPoint,
   resetWalkTracking,
   setActiveWalkId,
+  type WalkTrackingMode,
 } from '../lib/walkTask';
 
 export default function LiveWalkScreen({
   dog,
   walkId,
   startedAt,
+  trackingMode,
   onEnded,
 }: {
   dog: Dog;
   walkId: string;
   startedAt: string;
+  trackingMode: WalkTrackingMode;
   onEnded: (summary: WalkSummary) => void;
 }) {
   const [elapsedSec, setElapsedSec] = useState(0);
   const [distanceMeters, setDistanceMeters] = useState(0);
   const [ending, setEnding] = useState(false);
+  const foregroundWatch = useRef<Location.LocationSubscription | null>(null);
 
   useEffect(() => {
     const startedMs = new Date(startedAt).getTime();
@@ -39,10 +44,49 @@ export default function LiveWalkScreen({
     return () => clearInterval(interval);
   }, [startedAt]);
 
+  // Expo Go fallback: no background TaskManager task, so poll position
+  // while this screen is mounted and in the foreground instead.
+  useEffect(() => {
+    if (trackingMode !== 'foreground') return;
+
+    let cancelled = false;
+    Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.BestForNavigation,
+        timeInterval: 5000,
+        distanceInterval: 10,
+      },
+      (loc) => {
+        ingestPoint({
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+          recorded_at: new Date(loc.timestamp).toISOString(),
+        });
+      },
+    ).then((subscription) => {
+      if (cancelled) {
+        subscription.remove();
+      } else {
+        foregroundWatch.current = subscription;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      foregroundWatch.current?.remove();
+      foregroundWatch.current = null;
+    };
+  }, [trackingMode]);
+
   async function handleEndWalk() {
     setEnding(true);
     try {
-      await Location.stopLocationUpdatesAsync(WALK_LOCATION_TASK).catch(() => {});
+      if (trackingMode === 'background') {
+        await Location.stopLocationUpdatesAsync(WALK_LOCATION_TASK).catch(() => {});
+      } else {
+        foregroundWatch.current?.remove();
+        foregroundWatch.current = null;
+      }
       await flushBufferedPoints();
 
       const { data } = await supabase.auth.getSession();
@@ -78,6 +122,13 @@ export default function LiveWalkScreen({
           <Text style={styles.statLabel}>Ground covered</Text>
         </View>
       </View>
+
+      {trackingMode === 'foreground' && (
+        <Text style={styles.foregroundNotice}>
+          ⚠️ Keep this screen open and awake — thy hound's trail is only marked while Territory
+          stays in view.
+        </Text>
+      )}
 
       <Text style={styles.mapPlaceholder}>🗺️  The map of your domain will unfurl here.</Text>
 
@@ -149,6 +200,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   mapPlaceholder: { fontSize: 14, color: colors.inkSoft, textAlign: 'center' },
+  foregroundNotice: {
+    fontSize: 13,
+    color: colors.crestDark,
+    textAlign: 'center',
+    backgroundColor: colors.fieldBg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
   endButton: {
     backgroundColor: colors.danger,
     borderRadius: 12,

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 
 import type { Dog, WalkSummary as WalkSummaryData } from './api';
+import type { WalkTrackingMode } from './walkTask';
 import HomeScreen from '../screens/HomeScreen';
 import LiveWalkScreen from '../screens/LiveWalkScreen';
 import WalkSummaryScreen from '../screens/WalkSummaryScreen';
 
 type WalkFlowState =
   | { phase: 'idle' }
-  | { phase: 'active'; walkId: string; startedAt: string }
+  | { phase: 'active'; walkId: string; startedAt: string; trackingMode: WalkTrackingMode }
   | { phase: 'summary'; summary: WalkSummaryData };
 
 /**
@@ -32,6 +33,7 @@ export default function WalkFlow({
         dog={dog}
         walkId={state.walkId}
         startedAt={state.startedAt}
+        trackingMode={state.trackingMode}
         onEnded={(summary) => setState({ phase: 'summary', summary })}
       />
     );
@@ -52,7 +54,9 @@ export default function WalkFlow({
       dog={dog}
       ownerFirstName={ownerFirstName}
       onSignOut={onSignOut}
-      onWalkStarted={(walkId, startedAt) => setState({ phase: 'active', walkId, startedAt })}
+      onWalkStarted={(walkId, startedAt, trackingMode) =>
+        setState({ phase: 'active', walkId, startedAt, trackingMode })
+      }
     />
   );
 }

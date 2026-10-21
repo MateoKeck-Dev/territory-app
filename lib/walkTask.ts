@@ -7,6 +7,14 @@ import { supabase } from './supabase';
 
 export const WALK_LOCATION_TASK = 'territory-walk-location-task';
 
+/**
+ * 'background' = TaskManager-backed tracking that survives the app being
+ * backgrounded (needs a dev build — not available in Expo Go on iOS).
+ * 'foreground' = a plain watchPositionAsync subscription, active only while
+ * the live walk screen is mounted and the app is in the foreground.
+ */
+export type WalkTrackingMode = 'background' | 'foreground';
+
 const ACTIVE_WALK_KEY = 'territory.activeWalkId';
 const FLUSH_THRESHOLD = 20;
 const EARTH_RADIUS_M = 6371000;
@@ -36,6 +44,19 @@ function recordPoint(point: WalkPointInput) {
     trackedDistanceMeters += haversineMeters(lastPoint, point);
   }
   lastPoint = { lat: point.lat, lng: point.lng };
+}
+
+/**
+ * Shared entry point for a single GPS fix, used by both the background
+ * TaskManager task below and a foreground `watchPositionAsync` subscription
+ * (the Expo Go fallback, started from LiveWalkScreen). Same buffering/flush
+ * behavior either way — the transport delivering points doesn't matter.
+ */
+export async function ingestPoint(point: WalkPointInput): Promise<void> {
+  recordPoint(point);
+  if (pointBuffer.length >= FLUSH_THRESHOLD) {
+    await flushBufferedPoints();
+  }
 }
 
 export function getTrackedDistanceMeters(): number {
@@ -100,13 +121,10 @@ TaskManager.defineTask<LocationTaskData>(WALK_LOCATION_TASK, async ({ data, erro
     return;
   }
   for (const loc of data?.locations ?? []) {
-    recordPoint({
+    await ingestPoint({
       lat: loc.coords.latitude,
       lng: loc.coords.longitude,
       recorded_at: new Date(loc.timestamp).toISOString(),
     });
-  }
-  if (pointBuffer.length >= FLUSH_THRESHOLD) {
-    await flushBufferedPoints();
   }
 });

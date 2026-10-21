@@ -5,7 +5,12 @@ import * as Location from 'expo-location';
 import { startWalk, type Dog } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { avatarEmoji, colors } from '../lib/theme';
-import { WALK_LOCATION_TASK, resetWalkTracking, setActiveWalkId } from '../lib/walkTask';
+import {
+  WALK_LOCATION_TASK,
+  resetWalkTracking,
+  setActiveWalkId,
+  type WalkTrackingMode,
+} from '../lib/walkTask';
 
 const WALK_LOCATION_OPTIONS = {
   accuracy: Location.Accuracy.BestForNavigation,
@@ -28,7 +33,7 @@ export default function HomeScreen({
   dog: Dog;
   ownerFirstName: string;
   onSignOut: () => void;
-  onWalkStarted: (walkId: string, startedAt: string) => void;
+  onWalkStarted: (walkId: string, startedAt: string, trackingMode: WalkTrackingMode) => void;
 }) {
   const [startingWalk, setStartingWalk] = useState(false);
 
@@ -48,14 +53,6 @@ export default function HomeScreen({
         return;
       }
 
-      const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-      if (bgStatus !== 'granted') {
-        Alert.alert(
-          'No scout rides ahead',
-          "Without leave to track in the background, the trail may go cold whenever Territory isn't on screen. You can still walk with the app open.",
-        );
-      }
-
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
       if (!token) throw new Error('Your session has expired. Sign in again to continue.');
@@ -63,9 +60,22 @@ export default function HomeScreen({
       resetWalkTracking();
       const walk = await startWalk(token, dog.id);
       await setActiveWalkId(walk.id);
-      await Location.startLocationUpdatesAsync(WALK_LOCATION_TASK, WALK_LOCATION_OPTIONS);
 
-      onWalkStarted(walk.id, walk.started_at);
+      // Try background tracking (needs a dev build); fall back to
+      // foreground-only if it's denied or unavailable, e.g. in Expo Go,
+      // which doesn't support the custom native background config.
+      let trackingMode: WalkTrackingMode = 'foreground';
+      try {
+        const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+        if (bgStatus === 'granted') {
+          await Location.startLocationUpdatesAsync(WALK_LOCATION_TASK, WALK_LOCATION_OPTIONS);
+          trackingMode = 'background';
+        }
+      } catch (bgErr) {
+        console.warn('[walk] background tracking unavailable, using foreground-only:', bgErr);
+      }
+
+      onWalkStarted(walk.id, walk.started_at, trackingMode);
     } catch (err) {
       Alert.alert(
         'The quest failed to begin',
