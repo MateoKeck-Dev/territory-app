@@ -108,3 +108,44 @@ export function createDog(token: string, input: DogCreateInput): Promise<Dog> {
     body: JSON.stringify(input),
   });
 }
+
+export type WalkPointInput = { lat: number; lng: number; recorded_at: string };
+
+export type WalkStartResponse = { id: string; started_at: string };
+
+export type WalkPointsResponse = { points_saved: number };
+
+export type WalkSummary = {
+  distance_meters: number;
+  newly_claimed_cells: number;
+  total_area_sq_meters: number;
+  flavor_text: string;
+};
+
+export type WalkDiscardResponse = { id: string; status: string };
+
+export function startWalk(token: string, dogId: string): Promise<WalkStartResponse> {
+  return request<WalkStartResponse>('/walks/start', token, {
+    method: 'POST',
+    body: JSON.stringify({ dog_id: dogId }),
+  });
+}
+
+export function uploadWalkPoints(
+  token: string,
+  walkId: string,
+  points: WalkPointInput[],
+): Promise<WalkPointsResponse> {
+  return request<WalkPointsResponse>(`/walks/${walkId}/points`, token, {
+    method: 'POST',
+    body: JSON.stringify({ points }),
+  });
+}
+
+export function endWalk(token: string, walkId: string): Promise<WalkSummary> {
+  return request<WalkSummary>(`/walks/${walkId}/end`, token, { method: 'POST' });
+}
+
+export function discardWalk(token: string, walkId: string): Promise<WalkDiscardResponse> {
+  return request<WalkDiscardResponse>(`/walks/${walkId}/discard`, token, { method: 'POST' });
+}

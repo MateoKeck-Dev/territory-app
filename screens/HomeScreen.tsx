@@ -1,18 +1,81 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Location from 'expo-location';
 
-import type { Dog } from '../lib/api';
+import { startWalk, type Dog } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { avatarEmoji, colors } from '../lib/theme';
+import { WALK_LOCATION_TASK, resetWalkTracking, setActiveWalkId } from '../lib/walkTask';
+
+const WALK_LOCATION_OPTIONS = {
+  accuracy: Location.Accuracy.BestForNavigation,
+  timeInterval: 5000,
+  distanceInterval: 10,
+  showsBackgroundLocationIndicator: true,
+  pausesUpdatesAutomatically: false,
+  foregroundService: {
+    notificationTitle: 'Territory is on the march',
+    notificationBody: 'Tracking your walk in the background.',
+  },
+};
 
 export default function HomeScreen({
   dog,
   ownerFirstName,
   onSignOut,
+  onWalkStarted,
 }: {
   dog: Dog;
   ownerFirstName: string;
   onSignOut: () => void;
+  onWalkStarted: (walkId: string, startedAt: string) => void;
 }) {
+  const [startingWalk, setStartingWalk] = useState(false);
+
+  async function handleStartWalk() {
+    setStartingWalk(true);
+    try {
+      const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+      if (fgStatus !== 'granted') {
+        Alert.alert(
+          'The scouts refuse to march',
+          'Territory needs leave to see your position before a walk can begin. Grant location access in Settings to proceed.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+        return;
+      }
+
+      const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+      if (bgStatus !== 'granted') {
+        Alert.alert(
+          'No scout rides ahead',
+          "Without leave to track in the background, the trail may go cold whenever Territory isn't on screen. You can still walk with the app open.",
+        );
+      }
+
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Sign in again to continue.');
+
+      resetWalkTracking();
+      const walk = await startWalk(token, dog.id);
+      await setActiveWalkId(walk.id);
+      await Location.startLocationUpdatesAsync(WALK_LOCATION_TASK, WALK_LOCATION_OPTIONS);
+
+      onWalkStarted(walk.id, walk.started_at);
+    } catch (err) {
+      Alert.alert(
+        'The quest failed to begin',
+        err instanceof Error ? err.message : 'Something went wrong starting the walk.',
+      );
+    } finally {
+      setStartingWalk(false);
+    }
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.card}>
@@ -54,6 +117,18 @@ export default function HomeScreen({
       <Text style={styles.mapPlaceholder}>
         🗺️  The map of your domain will unfurl here.
       </Text>
+
+      <Pressable
+        style={({ pressed }) => [styles.startWalk, pressed && styles.startWalkPressed]}
+        disabled={startingWalk}
+        onPress={handleStartWalk}
+      >
+        {startingWalk ? (
+          <ActivityIndicator color={colors.white} />
+        ) : (
+          <Text style={styles.startWalkText}>Start walk</Text>
+        )}
+      </Pressable>
 
       <Pressable
         style={({ pressed }) => [styles.signOut, pressed && styles.signOutPressed]}
@@ -136,6 +211,16 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     textAlign: 'center',
   },
+  startWalk: {
+    backgroundColor: colors.crest,
+    borderRadius: 12,
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+    minWidth: 180,
+  },
+  startWalkPressed: { backgroundColor: colors.crestDark },
+  startWalkText: { color: colors.white, fontSize: 17, fontWeight: '800' },
   signOut: {
     paddingVertical: 12,
     paddingHorizontal: 24,

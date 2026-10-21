@@ -4,9 +4,9 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { listMyDogs, type Dog } from './api';
 import { firstNameFromSession, useAuth } from './AuthContext';
 import { colors } from './theme';
+import WalkFlow from './WalkFlow';
 import AuthScreen from '../screens/AuthScreen';
 import CreateDogScreen from '../screens/CreateDogScreen';
-import HomeScreen from '../screens/HomeScreen';
 
 /**
  * The whole "navigation" of the app right now — three mutually exclusive states,
@@ -14,7 +14,7 @@ import HomeScreen from '../screens/HomeScreen';
  *
  *   no session            -> AuthScreen
  *   session, zero dogs     -> CreateDogScreen
- *   session, has a dog     -> HomeScreen
+ *   session, has a dog     -> WalkFlow (home <-> live walk <-> summary)
  */
 export default function RootNavigator() {
   const { session, initializing } = useAuth();
@@ -68,7 +68,7 @@ function DogGate() {
   }
 
   return (
-    <HomeScreen
+    <WalkFlow
       dog={dogs[0]}
       ownerFirstName={firstNameFromSession(session)}
       onSignOut={signOut}
