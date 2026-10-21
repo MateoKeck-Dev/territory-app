@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 
+import { attemptDevAutoLogin } from './devAutoLogin';
 import { supabase } from './supabase';
 
 type AuthContextValue = {
@@ -19,9 +20,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      let activeSession = data.session;
+
+      // Dev-only convenience: skip the auth screen with a configured test
+      // account. No-ops (and is stripped) outside __DEV__ builds.
+      if (!activeSession) {
+        activeSession = await attemptDevAutoLogin();
+      }
+
       if (!mounted) return;
-      setSession(data.session);
+      setSession(activeSession);
       setInitializing(false);
     });
 
