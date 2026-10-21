@@ -23,15 +23,17 @@ export type WalkResult = {
  * no coordinates) is already what that call would feed.
  */
 export function useWalkSession() {
-  const { addItems, addWalkRecord } = useGameData();
+  const { addItems, addWalkRecord, justOnboarded, acknowledgeFirstWalkNudge } = useGameData();
   const [phase, setPhase] = useState<WalkSessionPhase>('idle');
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [result, setResult] = useState<WalkResult | null>(null);
 
   const startWalk = useCallback(() => {
+    // The post-onboarding nudge's job is done once a walk actually starts.
+    if (justOnboarded) acknowledgeFirstWalkNudge();
     setStartedAt(Date.now());
     setPhase('active');
-  }, []);
+  }, [justOnboarded, acknowledgeFirstWalkNudge]);
 
   const endWalk = useCallback(() => {
     const elapsedMin = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 60000)) : 5;

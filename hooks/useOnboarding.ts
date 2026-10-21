@@ -1,12 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useGameData } from './GameDataProvider';
 
-/**
- * Whether the dog-first onboarding flow has been completed. In-memory only
- * for this UI shell (resets on reload), independent of Supabase session
- * state — see RootNavigator for why.
- */
-export function useOnboardingState() {
-  const [hasOnboarded, setHasOnboarded] = useState(false);
-  const completeOnboarding = useCallback(() => setHasOnboarded(true), []);
-  return { hasOnboarded, completeOnboarding };
+/** Onboarding completion slice, shared via GameDataProvider so both
+ * RootNavigator (gating) and HomeScreen (the one-time first-walk nudge)
+ * see the same state. */
+export function useOnboarding() {
+  const { hasOnboarded, completeOnboarding, justOnboarded, acknowledgeFirstWalkNudge } = useGameData();
+  return { hasOnboarded, completeOnboarding, justOnboarded, acknowledgeFirstWalkNudge };
 }

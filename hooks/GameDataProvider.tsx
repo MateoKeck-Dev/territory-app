@@ -22,6 +22,14 @@ type GameData = {
 
   walkHistory: WalkRecord[];
   addWalkRecord: (record: WalkRecord) => void;
+
+  hasOnboarded: boolean;
+  completeOnboarding: () => void;
+  /** True only right after onboarding finishes, so Home can show a
+   * one-time "take [dog] on their first walk" nudge instead of the usual
+   * one. Cleared the first time something reads it. */
+  justOnboarded: boolean;
+  acknowledgeFirstWalkNudge: () => void;
 };
 
 const GameDataContext = createContext<GameData | undefined>(undefined);
@@ -39,6 +47,8 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const [inventory, setInventory] = useState<InventoryItem[]>(mockInventory);
   const [ownedCatalogueIds, setOwnedCatalogueIds] = useState<string[]>([]);
   const [walkHistory, setWalkHistory] = useState<WalkRecord[]>(mockWalkHistory);
+  const [hasOnboarded, setHasOnboarded] = useState(false);
+  const [justOnboarded, setJustOnboarded] = useState(false);
 
   const updateDog = useCallback((patch: Partial<DogProfile>) => {
     setDog((prev) => ({ ...prev, ...patch }));
@@ -80,6 +90,13 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     setWalkHistory((prev) => [record, ...prev]);
   }, []);
 
+  const completeOnboarding = useCallback(() => {
+    setHasOnboarded(true);
+    setJustOnboarded(true);
+  }, []);
+
+  const acknowledgeFirstWalkNudge = useCallback(() => setJustOnboarded(false), []);
+
   const value: GameData = {
     dog,
     updateDog,
@@ -94,6 +111,10 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     buyCatalogueItem,
     walkHistory,
     addWalkRecord,
+    hasOnboarded,
+    completeOnboarding,
+    justOnboarded,
+    acknowledgeFirstWalkNudge,
   };
 
   return <GameDataContext.Provider value={value}>{children}</GameDataContext.Provider>;

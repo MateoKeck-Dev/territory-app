@@ -12,6 +12,7 @@ import { useChallenges } from '../../hooks/useChallenges';
 import { useCoins } from '../../hooks/useCoins';
 import { useDog } from '../../hooks/useDog';
 import { useInventory } from '../../hooks/useInventory';
+import { useOnboarding } from '../../hooks/useOnboarding';
 import { APP_NAME, useTheme } from '../../lib/theme';
 import type { HomeStackParamList } from '../../navigation/types';
 
@@ -25,6 +26,7 @@ export function HomeScreen({
   const { coins } = useCoins();
   const { items, toggleDisplay } = useInventory();
   const { challenges } = useChallenges();
+  const { justOnboarded } = useOnboarding();
   const [decorating, setDecorating] = useState(false);
 
   const placedItems = items.filter((i) => i.placed);
@@ -41,7 +43,9 @@ export function HomeScreen({
 
       <Card style={{ backgroundColor: colors.secondary }}>
         <Text style={{ color: '#FFFFFF', fontSize: fontSizes.md, fontWeight: fontWeights.bold }}>
-          🐕 {dog.name} is restless — time for a walk?
+          {justOnboarded
+            ? `🐕 Take ${dog.name} on their first walk!`
+            : `🐕 ${dog.name} is restless — time for a walk?`}
         </Text>
       </Card>
 
