@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
+import { ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { useTheme } from '../lib/theme';
 
@@ -10,7 +10,7 @@ export function ScreenContainer({
 }: {
   children: React.ReactNode;
   scroll?: boolean;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }) {
   const { colors, spacing } = useTheme();
   const containerStyle = [
