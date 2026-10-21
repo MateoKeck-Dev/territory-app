@@ -26,6 +26,11 @@ let pointBuffer: WalkPointInput[] = [];
 let flushing = false;
 let lastPoint: { lat: number; lng: number } | null = null;
 let trackedDistanceMeters = 0;
+// Assigned once per point, here, regardless of transport — never
+// re-derived from the server — so a retried flush re-sends the same seq
+// values and the backend's ON CONFLICT (walk_id, seq) DO NOTHING can tell
+// "already got this one" from "genuinely new".
+let nextSeq = 0;
 
 function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -38,12 +43,13 @@ function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng:
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
 }
 
-function recordPoint(point: WalkPointInput) {
-  pointBuffer.push(point);
+function recordPoint(point: Omit<WalkPointInput, 'seq'>) {
+  const withSeq: WalkPointInput = { ...point, seq: nextSeq++ };
+  pointBuffer.push(withSeq);
   if (lastPoint) {
-    trackedDistanceMeters += haversineMeters(lastPoint, point);
+    trackedDistanceMeters += haversineMeters(lastPoint, withSeq);
   }
-  lastPoint = { lat: point.lat, lng: point.lng };
+  lastPoint = { lat: withSeq.lat, lng: withSeq.lng };
 }
 
 /**
@@ -51,8 +57,9 @@ function recordPoint(point: WalkPointInput) {
  * TaskManager task below and a foreground `watchPositionAsync` subscription
  * (the Expo Go fallback, started from LiveWalkScreen). Same buffering/flush
  * behavior either way — the transport delivering points doesn't matter.
+ * Callers don't supply `seq`; it's assigned here, once, in capture order.
  */
-export async function ingestPoint(point: WalkPointInput): Promise<void> {
+export async function ingestPoint(point: Omit<WalkPointInput, 'seq'>): Promise<void> {
   recordPoint(point);
   if (pointBuffer.length >= FLUSH_THRESHOLD) {
     await flushBufferedPoints();
@@ -68,6 +75,7 @@ export function resetWalkTracking() {
   pointBuffer = [];
   lastPoint = null;
   trackedDistanceMeters = 0;
+  nextSeq = 0;
 }
 
 export async function setActiveWalkId(walkId: string | null) {

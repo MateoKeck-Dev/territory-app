@@ -109,7 +109,10 @@ export function createDog(token: string, input: DogCreateInput): Promise<Dog> {
   });
 }
 
-export type WalkPointInput = { lat: number; lng: number; recorded_at: string };
+// seq is assigned once per point at capture time (see lib/walkTask.ts) and
+// re-sent unchanged on retry, so the server can dedupe a retried batch via
+// ON CONFLICT (walk_id, seq) DO NOTHING instead of inserting it twice.
+export type WalkPointInput = { seq: number; lat: number; lng: number; recorded_at: string };
 
 export type WalkStartResponse = { id: string; started_at: string };
 
