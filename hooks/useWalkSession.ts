@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 
-import { dropPool, type InventoryItem } from '../mocks/items';
+import { rollDrops, type InventoryItem } from '../mocks/items';
 import { useGameData } from './GameDataProvider';
 
 export type WalkSessionPhase = 'idle' | 'active' | 'recap' | 'revealing' | 'done';
@@ -11,14 +11,6 @@ export type WalkResult = {
   activeMinutes: number;
   drops: InventoryItem[];
 };
-
-function rollDrops(): InventoryItem[] {
-  const count = 1 + Math.floor(Math.random() * 3); // 1-3 finds per walk
-  return Array.from({ length: count }, (_, i) => {
-    const base = dropPool[Math.floor(Math.random() * dropPool.length)];
-    return { ...base, id: `drop-${Date.now()}-${i}`, placed: false };
-  });
-}
 
 /**
  * Walk flow state machine: idle -> active -> recap -> revealing -> done.

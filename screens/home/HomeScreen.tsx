@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { CoinBadge } from '../../components/Badges';
+import { DogAvatar } from '../../components/DogAvatar';
 import { ProgressBar } from '../../components/ProgressBar';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { useChallenges } from '../../hooks/useChallenges';
@@ -78,7 +79,7 @@ export function HomeScreen({
             </Pressable>
           ))}
         </View>
-        <Text style={styles.dogEmoji}>🐶</Text>
+        <DogAvatar markings={dog.markings} size={88} />
         <Text style={{ color: colors.textMuted, fontSize: fontSizes.xs }}>Tap {dog.name} to see their profile</Text>
       </Pressable>
 
@@ -107,6 +108,5 @@ const styles = StyleSheet.create({
   room: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, paddingVertical: 36, gap: 6 },
   roomItems: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, position: 'absolute', top: 10, left: 10 },
   roomItem: { alignItems: 'center' },
-  dogEmoji: { fontSize: 72 },
   actionsRow: { flexDirection: 'row', gap: 10 },
 });

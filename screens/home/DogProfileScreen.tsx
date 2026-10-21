@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Card } from '../../components/Card';
+import { DogAvatar } from '../../components/DogAvatar';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { useDog } from '../../hooks/useDog';
 import { useGameData } from '../../hooks/GameDataProvider';
@@ -22,7 +23,7 @@ export function DogProfileScreen() {
   return (
     <ScreenContainer>
       <View style={styles.header}>
-        <Text style={styles.avatar}>🐶</Text>
+        <DogAvatar markings={dog.markings} size={96} />
         <Text style={{ color: colors.text, fontSize: fontSizes.xl, fontWeight: fontWeights.bold }}>
           {dog.name}
         </Text>
@@ -60,7 +61,6 @@ export function DogProfileScreen() {
 
 const styles = StyleSheet.create({
   header: { alignItems: 'center', gap: 4 },
-  avatar: { fontSize: 64 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   statCard: { flexBasis: '47%', alignItems: 'center', gap: 2 },
   walkRow: { gap: 4 },
