@@ -13,11 +13,7 @@ import type { DogMarkings } from '../mocks/dog';
  */
 export function DogAvatar({ markings, size = 96 }: { markings: DogMarkings; size: number }) {
   const markingAsset =
-    markings.pattern === 'solid'
-      ? null
-      : markings.pattern === 'spots'
-        ? dogPartAssets.ears.cropped // small round spot shape, reused here
-        : ({ kind: 'shape', shape: 'oval', tint: 'marking' } as const);
+    markings.pattern === 'solid' ? null : dogPartAssets.markings[markings.pattern];
 
   return (
     <View style={{ width: size, height: size }}>

@@ -35,6 +35,11 @@ export const dogPartAssets = {
     fluffy: { kind: 'shape', shape: 'circle', tint: 'base' } as AssetRef,
   } satisfies Record<TailStyle, AssetRef>,
 
+  markings: {
+    spots: { kind: 'shape', shape: 'circle', tint: 'marking' } as AssetRef,
+    patch: { kind: 'shape', shape: 'oval', tint: 'marking' } as AssetRef,
+  },
+
   outfits: {
     none: null,
     bandana: { kind: 'emoji', glyph: '🧣' } as AssetRef,
