@@ -2,5 +2,15 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "lib/RootNavigator.tsx",
+    "lib/WalkFlow.tsx",
+    "screens/AuthScreen.tsx",
+    "screens/CreateDogScreen.tsx",
+    "screens/HomeScreen.tsx",
+    "screens/LiveWalkScreen.tsx",
+    "screens/WalkSummaryScreen.tsx"
+  ]
 }

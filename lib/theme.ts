@@ -1,47 +1,146 @@
-/**
- * Shared look-and-feel + the preset choices offered on the "create your dog"
- * screen. Kept deliberately small — avatars are emoji, not uploads (V2 problem).
- */
+import { useColorScheme } from 'react-native';
 
-export const colors = {
-  parchment: '#F4ECD8',
-  parchmentDark: '#E7DABE',
-  ink: '#2B2118',
-  inkSoft: '#6B5D4B',
-  crest: '#7A2E2E',
-  crestDark: '#5E2121',
-  border: '#C9B48C',
-  danger: '#B23B2E',
-  fieldBg: '#FBF6EA',
-  white: '#FFFFFF',
+/**
+ * Single place to rename the app. TBD — everything else reads this instead
+ * of a hardcoded string.
+ */
+export const APP_NAME = 'Pawlace';
+
+export type Rarity = 'common' | 'uncommon' | 'rare' | 'seasonal';
+
+export type ThemeColors = {
+  background: string;
+  surface: string;
+  surfaceAlt: string;
+  card: string;
+  border: string;
+  text: string;
+  textMuted: string;
+  textOnPrimary: string;
+  primary: string;
+  primaryDark: string;
+  secondary: string;
+  accent: string;
+  coin: string;
+  success: string;
+  danger: string;
+  overlay: string;
+  rarity: Record<Rarity, string>;
 };
 
-/** Territory colours — a knight picks their banner from these. */
-export const TERRITORY_COLORS: string[] = [
-  '#C0392B', // crimson
-  '#E67E22', // amber
-  '#F1C40F', // gold
-  '#27AE60', // forest
-  '#16A085', // teal
-  '#2980B9', // royal blue
-  '#8E44AD', // indigo
-  '#E84393', // rose
-];
+const lightColors: ThemeColors = {
+  background: '#FFF7ED',
+  surface: '#FFFFFF',
+  surfaceAlt: '#FFEFD9',
+  card: '#FFFFFF',
+  border: '#F0DCC0',
+  text: '#43302A',
+  textMuted: '#8C7568',
+  textOnPrimary: '#FFFFFF',
+  primary: '#FF8A5B',
+  primaryDark: '#E8713F',
+  secondary: '#5EC9B3',
+  accent: '#FFC857',
+  coin: '#F5A623',
+  success: '#59B569',
+  danger: '#E8604C',
+  overlay: 'rgba(67, 48, 42, 0.45)',
+  rarity: {
+    common: '#9AA5B1',
+    uncommon: '#5EC9B3',
+    rare: '#6C8BFF',
+    seasonal: '#E85FD0',
+  },
+};
 
-export type AvatarOption = { id: string; emoji: string; label: string };
+const darkColors: ThemeColors = {
+  background: '#241A16',
+  surface: '#352620',
+  surfaceAlt: '#3F2D25',
+  card: '#3A2A23',
+  border: '#4A362C',
+  text: '#FBEFE6',
+  textMuted: '#C2A896',
+  textOnPrimary: '#FFFFFF',
+  primary: '#FF9868',
+  primaryDark: '#FF7A3D',
+  secondary: '#6FDCC6',
+  accent: '#FFD268',
+  coin: '#FFC24D',
+  success: '#6FCB7E',
+  danger: '#FF7B68',
+  overlay: 'rgba(0, 0, 0, 0.55)',
+  rarity: {
+    common: '#A9B3BE',
+    uncommon: '#6FDCC6',
+    rare: '#8AA2FF',
+    seasonal: '#F083E0',
+  },
+};
 
-/** avatar_id sent to the API is the `id` string; the emoji is just for display. */
-export const AVATARS: AvatarOption[] = [
-  { id: 'hound', emoji: '🐕', label: 'Hound' },
-  { id: 'wolf', emoji: '🐺', label: 'Wolf' },
-  { id: 'paw', emoji: '🐾', label: 'Paw' },
-  { id: 'bone', emoji: '🦴', label: 'Bone' },
-  { id: 'crown', emoji: '👑', label: 'Crown' },
-  { id: 'shield', emoji: '🛡️', label: 'Shield' },
-  { id: 'sword', emoji: '⚔️', label: 'Blade' },
-  { id: 'castle', emoji: '🏰', label: 'Keep' },
-];
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+};
 
-export function avatarEmoji(avatarId: string | null | undefined): string {
-  return AVATARS.find((a) => a.id === avatarId)?.emoji ?? '🐾';
+export const radii = {
+  sm: 8,
+  md: 14,
+  lg: 20,
+  xl: 28,
+  pill: 999,
+};
+
+export const fontSizes = {
+  xs: 12,
+  sm: 14,
+  md: 16,
+  lg: 20,
+  xl: 26,
+  xxl: 34,
+};
+
+export const fontWeights = {
+  regular: '400' as const,
+  medium: '600' as const,
+  bold: '800' as const,
+};
+
+export type Theme = {
+  scheme: 'light' | 'dark';
+  colors: ThemeColors;
+  spacing: typeof spacing;
+  radii: typeof radii;
+  fontSizes: typeof fontSizes;
+  fontWeights: typeof fontWeights;
+};
+
+/** The one hook every screen uses to read colors/spacing/radii/fonts. */
+export function useTheme(): Theme {
+  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  return {
+    scheme,
+    colors: scheme === 'dark' ? darkColors : lightColors,
+    spacing,
+    radii,
+    fontSizes,
+    fontWeights,
+  };
+}
+
+export function rarityLabel(rarity: Rarity): string {
+  switch (rarity) {
+    case 'common':
+      return 'Common';
+    case 'uncommon':
+      return 'Uncommon';
+    case 'rare':
+      return 'Rare';
+    case 'seasonal':
+      return 'Seasonal';
+  }
 }

@@ -1,20 +1,29 @@
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider } from './lib/AuthContext';
-import RootNavigator from './lib/RootNavigator';
+import { useTheme } from './lib/theme';
+import { GameDataProvider } from './hooks/GameDataProvider';
+import { RootNavigator } from './navigation/RootNavigator';
 
-export default function App() {
+function AppContent() {
+  const { scheme } = useTheme();
   return (
-    <AuthProvider>
-      <SafeAreaView style={styles.root}>
-        <StatusBar style="dark" />
-        <RootNavigator />
-      </SafeAreaView>
-    </AuthProvider>
+    <>
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+      <RootNavigator />
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F4ECD8' },
-});
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AuthProvider>
+        <GameDataProvider>
+          <AppContent />
+        </GameDataProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
+  );
+}
