@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { colors } from '../lib/theme';
 import {
   WALK_LOCATION_TASK,
-  flushBufferedPoints,
+  drainBufferedPoints,
   getTrackedDistanceMeters,
   ingestPoint,
   resetWalkTracking,
@@ -87,7 +87,9 @@ export default function LiveWalkScreen({
         foregroundWatch.current?.remove();
         foregroundWatch.current = null;
       }
-      await flushBufferedPoints();
+      // Throws (buffer left intact) rather than giving up after a few
+      // points — resetWalkTracking() below must never run over unsent data.
+      await drainBufferedPoints();
 
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
@@ -102,6 +104,9 @@ export default function LiveWalkScreen({
         'The hunt will not end',
         err instanceof Error ? err.message : 'Something went wrong ending the walk.',
       );
+      // Tracking is already stopped above, but the buffer and activeWalkId
+      // are untouched on this path — tapping End walk again resumes
+      // draining and finishes the job instead of losing anything.
     } finally {
       setEnding(false);
     }

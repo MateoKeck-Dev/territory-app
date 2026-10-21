@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { listMyDogs, type Dog } from './api';
 import { firstNameFromSession, useAuth } from './AuthContext';
+import { supabase } from './supabase';
 import { colors } from './theme';
 import WalkFlow from './WalkFlow';
 import AuthScreen from '../screens/AuthScreen';
@@ -28,21 +29,43 @@ export default function RootNavigator() {
 
 function DogGate() {
   const { session, signOut } = useAuth();
-  const token = session?.access_token ?? null;
 
   const [dogs, setDogs] = useState<Dog[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Ref, not state: lets `load` stay referentially stable (empty dep array)
+  // while still knowing whether this is the first-ever load.
+  const hasLoadedOnce = useRef(false);
 
+  // Deliberately NOT keyed on the access token. Supabase rotates it roughly
+  // hourly via autoRefreshToken, which fires onAuthStateChange and would
+  // retrigger this on every refresh if it were a dependency — and a failed
+  // refetch mid-walk would replace WalkFlow with this screen's error state,
+  // unmounting LiveWalkScreen and orphaning the walk server-side. Fetch
+  // once per signed-in user instead (RootNavigator already remounts this
+  // component via key={session.user.id} when the user changes), reading a
+  // fresh token lazily inside load() rather than depending on it.
   const load = useCallback(async () => {
-    if (!token) return;
-    setError(null);
     try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Sign in again to continue.');
+
       const result = await listMyDogs(token);
+      hasLoadedOnce.current = true;
       setDogs(result);
+      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load your dogs.');
+      const message = err instanceof Error ? err.message : 'Could not load your dogs.';
+      if (!hasLoadedOnce.current) {
+        // Nothing loaded yet — there's no "last known state" to fall back
+        // to, so this is the only case where showing the error screen is
+        // safe (there's no active walk yet to unmount).
+        setError(message);
+      } else {
+        console.warn('[dogs] background refetch failed, keeping last known dogs:', message);
+      }
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     load();

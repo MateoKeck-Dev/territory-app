@@ -16,6 +16,7 @@ export const WALK_LOCATION_TASK = 'territory-walk-location-task';
 export type WalkTrackingMode = 'background' | 'foreground';
 
 const ACTIVE_WALK_KEY = 'territory.activeWalkId';
+const ACTIVE_WALK_SEQ_KEY = 'territory.activeWalkSeq';
 const FLUSH_THRESHOLD = 20;
 const EARTH_RADIUS_M = 6371000;
 
@@ -23,14 +24,30 @@ const EARTH_RADIUS_M = 6371000;
 // index.ts so TaskManager's background callback (which can run with no
 // screen mounted) and the live walk screen share the same buffer/counters.
 let pointBuffer: WalkPointInput[] = [];
-let flushing = false;
 let lastPoint: { lat: number; lng: number } | null = null;
 let trackedDistanceMeters = 0;
+
 // Assigned once per point, here, regardless of transport — never
 // re-derived from the server — so a retried flush re-sends the same seq
 // values and the backend's ON CONFLICT (walk_id, seq) DO NOTHING can tell
-// "already got this one" from "genuinely new".
-let nextSeq = 0;
+// "already got this one" from "genuinely new". Mirrored to AsyncStorage
+// (best-effort, not awaited inline) so a JS reload or a headless relaunch
+// resumes counting from where it left off instead of restarting at 0 —
+// which would otherwise make every point after the relaunch collide with
+// (and get silently dropped as a duplicate of) one already on the server.
+// null means "not loaded from storage yet this process".
+let nextSeq: number | null = null;
+
+async function nextSeqValue(): Promise<number> {
+  if (nextSeq === null) {
+    const stored = await AsyncStorage.getItem(ACTIVE_WALK_SEQ_KEY);
+    nextSeq = stored ? parseInt(stored, 10) : 0;
+  }
+  const value = nextSeq;
+  nextSeq += 1;
+  AsyncStorage.setItem(ACTIVE_WALK_SEQ_KEY, String(nextSeq)).catch(() => {});
+  return value;
+}
 
 function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -43,8 +60,9 @@ function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng:
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
 }
 
-function recordPoint(point: Omit<WalkPointInput, 'seq'>) {
-  const withSeq: WalkPointInput = { ...point, seq: nextSeq++ };
+async function recordPoint(point: Omit<WalkPointInput, 'seq'>) {
+  const seq = await nextSeqValue();
+  const withSeq: WalkPointInput = { ...point, seq };
   pointBuffer.push(withSeq);
   if (lastPoint) {
     trackedDistanceMeters += haversineMeters(lastPoint, withSeq);
@@ -60,7 +78,7 @@ function recordPoint(point: Omit<WalkPointInput, 'seq'>) {
  * Callers don't supply `seq`; it's assigned here, once, in capture order.
  */
 export async function ingestPoint(point: Omit<WalkPointInput, 'seq'>): Promise<void> {
-  recordPoint(point);
+  await recordPoint(point);
   if (pointBuffer.length >= FLUSH_THRESHOLD) {
     await flushBufferedPoints();
   }
@@ -76,6 +94,7 @@ export function resetWalkTracking() {
   lastPoint = null;
   trackedDistanceMeters = 0;
   nextSeq = 0;
+  AsyncStorage.setItem(ACTIVE_WALK_SEQ_KEY, '0').catch(() => {});
 }
 
 export async function setActiveWalkId(walkId: string | null) {
@@ -90,34 +109,77 @@ async function getActiveWalkId(): Promise<string | null> {
   return AsyncStorage.getItem(ACTIVE_WALK_KEY);
 }
 
-/**
- * Sends whatever's buffered. Re-fetches the session token fresh each time
- * (rather than caching it) so this still works if the background task's JS
- * context was relaunched headless and lost any in-memory token.
- */
-export async function flushBufferedPoints(): Promise<void> {
-  if (flushing || pointBuffer.length === 0) return;
-
+/** One attempt to send everything currently buffered. Throws on failure,
+ * after putting the points back so nothing already captured is lost. */
+async function flushOnce(): Promise<void> {
   const walkId = await getActiveWalkId();
   if (!walkId) {
     pointBuffer = [];
     return;
   }
 
-  flushing = true;
   const toSend = pointBuffer;
   pointBuffer = [];
   try {
+    // Re-fetch the session token fresh each time (rather than caching it)
+    // so this still works if the background task's JS context was
+    // relaunched headless and lost any in-memory token.
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) throw new Error('no active session');
     await uploadWalkPoints(token, walkId, toSend);
   } catch (err) {
-    // Couldn't send: put them back so nothing's lost, next flush retries.
     pointBuffer = [...toSend, ...pointBuffer];
-    console.warn('[walk] failed to flush points, will retry:', err);
-  } finally {
-    flushing = false;
+    throw err;
+  }
+}
+
+// Tracks the in-flight flush, if any, as a promise rather than a boolean —
+// set synchronously (before any await) so two calls arriving back-to-back
+// can't both see "nothing in flight" and both start sending, which would
+// race on reading/clearing pointBuffer.
+let inFlight: Promise<void> | null = null;
+
+/** Best-effort flush for the capture path: coalesces concurrent calls onto
+ * one in-flight attempt, and never throws (logs and leaves points in the
+ * buffer for the next flush to retry). */
+export function flushBufferedPoints(): Promise<void> {
+  if (inFlight) return inFlight;
+  if (pointBuffer.length === 0) return Promise.resolve();
+
+  inFlight = flushOnce()
+    .catch((err) => {
+      console.warn('[walk] failed to flush points, will retry:', err);
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+  return inFlight;
+}
+
+/**
+ * Used only when ending a walk: waits out any in-flight flush, then keeps
+ * retrying until the buffer is genuinely empty. Throws (without touching
+ * the buffer) if it can't get there — callers must not proceed to
+ * resetWalkTracking()/discard state on a throw, or unsent points are lost.
+ */
+export async function drainBufferedPoints(): Promise<void> {
+  if (inFlight) {
+    await inFlight;
+  }
+
+  const maxAttempts = 5;
+  for (let attempt = 1; pointBuffer.length > 0 && attempt <= maxAttempts; attempt++) {
+    try {
+      await flushOnce();
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        throw err instanceof Error
+          ? err
+          : new Error('Could not send all walk points — check your connection and try again.');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
   }
 }
 
