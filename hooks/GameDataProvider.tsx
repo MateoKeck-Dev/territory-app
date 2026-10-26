@@ -1,8 +1,19 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
 
 import { mockDog, type DogProfile } from '../mocks/dog';
-import { mockInventory, type InventoryItem } from '../mocks/items';
+import { mockInventory, rollDrops, type InventoryItem } from '../mocks/items';
 import { mockWalkHistory, type WalkRecord } from '../mocks/walkHistory';
+
+type WalkSessionPhase = 'idle' | 'active' | 'recap' | 'revealing' | 'done';
+type RouteNovelty = 'new' | 'regular';
+
+type WalkResult = {
+  distanceKm: number;
+  activeMinutes: number;
+  sniffSpotsHit: number;
+  routeNovelty: RouteNovelty;
+  drops: InventoryItem[];
+};
 
 type GameData = {
   dog: DogProfile;
@@ -30,16 +41,31 @@ type GameData = {
    * one. Cleared the first time something reads it. */
   justOnboarded: boolean;
   acknowledgeFirstWalkNudge: () => void;
+
+  // Walk session: shared state, not screen-local — WalkStartScreen,
+  // WalkActiveScreen, WalkRecapScreen, and DropRevealScreen are each a
+  // separate component instance, so this must live here (or another
+  // shared provider) rather than in a useState inside a hook they each
+  // call independently, or each screen would see its own disconnected copy.
+  walkPhase: WalkSessionPhase;
+  walkStartedAt: number | null;
+  walkResult: WalkResult | null;
+  startWalk: () => void;
+  endWalk: () => void;
+  beginReveal: () => void;
+  finishReveal: () => void;
+  resetWalkSession: () => void;
 };
 
 const GameDataContext = createContext<GameData | undefined>(undefined);
 
 /**
  * Single in-memory store for all the mock "save data" screens share
- * (coins, inventory, dog, walk history, catalogue ownership). This is the
- * data-access layer: screens read it through the useDog/useInventory/etc.
- * hooks below, never this file directly, so swapping any slice for a real
- * API later doesn't touch screen code.
+ * (coins, inventory, dog, walk history, catalogue ownership, the walk
+ * session in progress). This is the data-access layer: screens read it
+ * through the useDog/useInventory/useWalkSession/etc. hooks below, never
+ * this file directly, so swapping any slice for a real API later doesn't
+ * touch screen code.
  */
 export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const [dog, setDog] = useState<DogProfile>(mockDog);
@@ -49,6 +75,9 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const [walkHistory, setWalkHistory] = useState<WalkRecord[]>(mockWalkHistory);
   const [hasOnboarded, setHasOnboarded] = useState(false);
   const [justOnboarded, setJustOnboarded] = useState(false);
+  const [walkPhase, setWalkPhase] = useState<WalkSessionPhase>('idle');
+  const [walkStartedAt, setWalkStartedAt] = useState<number | null>(null);
+  const [walkResult, setWalkResult] = useState<WalkResult | null>(null);
 
   const updateDog = useCallback((patch: Partial<DogProfile>) => {
     setDog((prev) => ({ ...prev, ...patch }));
@@ -56,27 +85,38 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
 
   const addCoins = useCallback((amount: number) => setCoins((c) => c + amount), []);
 
-  const spendCoins = useCallback((amount: number) => {
-    let ok = false;
-    setCoins((c) => {
-      if (c < amount) return c;
-      ok = true;
-      return c - amount;
-    });
-    return ok;
-  }, []);
+  // Reads the balance synchronously rather than deciding inside the
+  // setCoins updater: that updater can run after this function has
+  // already returned (React never guarantees it runs inline), so a flag
+  // set inside it and read right after would always read its initial
+  // value — the purchase would silently succeed in state while the caller
+  // was told it failed.
+  const spendCoins = useCallback(
+    (amount: number) => {
+      if (coins < amount) return false;
+      setCoins((c) => c - amount);
+      return true;
+    },
+    [coins],
+  );
 
   const addItems = useCallback((items: InventoryItem[]) => {
     setInventory((prev) => [...items, ...prev]);
   }, []);
 
-  const sellItem = useCallback((id: string) => {
-    setInventory((prev) => {
-      const item = prev.find((i) => i.id === id);
-      if (item) setCoins((c) => c + item.coinValue);
-      return prev.filter((i) => i.id !== id);
-    });
-  }, []);
+  // Reads the item from current state rather than inside the setInventory
+  // updater: updaters must stay pure (React can invoke one more than once,
+  // e.g. under StrictMode), and calling setCoins from inside one would
+  // double-credit on a repeat invocation.
+  const sellItem = useCallback(
+    (id: string) => {
+      const item = inventory.find((i) => i.id === id);
+      if (!item) return;
+      setCoins((c) => c + item.coinValue);
+      setInventory((prev) => prev.filter((i) => i.id !== id));
+    },
+    [inventory],
+  );
 
   const toggleDisplay = useCallback((id: string) => {
     setInventory((prev) => prev.map((i) => (i.id === id ? { ...i, placed: !i.placed } : i)));
@@ -97,6 +137,55 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
 
   const acknowledgeFirstWalkNudge = useCallback(() => setJustOnboarded(false), []);
 
+  const startWalk = useCallback(() => {
+    if (justOnboarded) acknowledgeFirstWalkNudge();
+    setWalkStartedAt(Date.now());
+    setWalkResult(null);
+    setWalkPhase('active');
+  }, [justOnboarded, acknowledgeFirstWalkNudge]);
+
+  const endWalk = useCallback(() => {
+    const elapsedMin = walkStartedAt
+      ? Math.max(1, Math.round((Date.now() - walkStartedAt) / 60000))
+      : 5;
+    // Mock GPS-derived numbers scaled to elapsed time, not a real track.
+    // ~70-100m/min is a plausible dog-walking pace for the mock.
+    const distanceKm = Math.round(elapsedMin * (0.07 + Math.random() * 0.03) * 100) / 100;
+    const sniffSpotsHit = Math.floor(Math.random() * 4);
+    const routeNovelty: RouteNovelty = Math.random() < 0.3 ? 'new' : 'regular';
+    setWalkResult({
+      distanceKm,
+      activeMinutes: elapsedMin,
+      sniffSpotsHit,
+      routeNovelty,
+      drops: rollDrops(),
+    });
+    setWalkPhase('recap');
+  }, [walkStartedAt]);
+
+  const beginReveal = useCallback(() => setWalkPhase('revealing'), []);
+
+  const finishReveal = useCallback(() => {
+    if (walkResult) {
+      addItems(walkResult.drops);
+      addWalkRecord({
+        id: `walk-${Date.now()}`,
+        dateLabel: 'Today',
+        distanceKm: walkResult.distanceKm,
+        activeMinutes: walkResult.activeMinutes,
+        sniffSpotsHit: walkResult.sniffSpotsHit,
+        itemsFound: walkResult.drops.length,
+      });
+    }
+    setWalkPhase('done');
+  }, [walkResult, addItems, addWalkRecord]);
+
+  const resetWalkSession = useCallback(() => {
+    setWalkPhase('idle');
+    setWalkStartedAt(null);
+    setWalkResult(null);
+  }, []);
+
   const value: GameData = {
     dog,
     updateDog,
@@ -115,6 +204,14 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     completeOnboarding,
     justOnboarded,
     acknowledgeFirstWalkNudge,
+    walkPhase,
+    walkStartedAt,
+    walkResult,
+    startWalk,
+    endWalk,
+    beginReveal,
+    finishReveal,
+    resetWalkSession,
   };
 
   return <GameDataContext.Provider value={value}>{children}</GameDataContext.Provider>;
