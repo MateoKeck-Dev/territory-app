@@ -1,19 +1,15 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
 
 import { mockDog, type DogProfile } from '../mocks/dog';
-import { mockInventory, rollDrops, type InventoryItem } from '../mocks/items';
+import { mockInventory, type InventoryItem } from '../mocks/items';
 import { mockWalkHistory, type WalkRecord } from '../mocks/walkHistory';
+import * as walkTask from '../lib/walkTask';
+import type { UnfinishedWalk } from '../lib/walk/db';
+import type { WalkSummary } from '../lib/walk/types';
 
 type WalkSessionPhase = 'idle' | 'active' | 'recap' | 'revealing' | 'done';
-type RouteNovelty = 'new' | 'regular';
 
-type WalkResult = {
-  distanceKm: number;
-  activeMinutes: number;
-  sniffSpotsHit: number;
-  routeNovelty: RouteNovelty;
-  drops: InventoryItem[];
-};
+export type StartWalkOutcome = { ok: true } | { ok: false; reason: 'permission_denied' };
 
 type GameData = {
   dog: DogProfile;
@@ -44,17 +40,28 @@ type GameData = {
 
   // Walk session: shared state, not screen-local — WalkStartScreen,
   // WalkActiveScreen, WalkRecapScreen, and DropRevealScreen are each a
-  // separate component instance, so this must live here (or another
-  // shared provider) rather than in a useState inside a hook they each
-  // call independently, or each screen would see its own disconnected copy.
+  // separate component instance, so this must live here rather than in a
+  // useState inside a hook they each call independently, or each screen
+  // would see its own disconnected copy. startWalk/endWalk delegate to
+  // lib/walkTask.ts for the real permission/tracking/SQLite work.
   walkPhase: WalkSessionPhase;
+  walkId: string | null;
   walkStartedAt: number | null;
-  walkResult: WalkResult | null;
-  startWalk: () => void;
-  endWalk: () => void;
+  walkTrackingMode: walkTask.WalkTrackingMode | null;
+  walkSummary: WalkSummary | null;
+  walkDrops: InventoryItem[];
+  startWalk: (dogName: string) => Promise<StartWalkOutcome>;
+  endWalk: () => Promise<void>;
   beginReveal: () => void;
   finishReveal: () => void;
   resetWalkSession: () => void;
+
+  // Resume-or-discard an unfinished walk found at app launch (killed
+  // mid-walk last time). See App.tsx, which runs the check once on boot.
+  unfinishedWalk: UnfinishedWalk | null;
+  checkForUnfinishedWalk: () => Promise<void>;
+  resumeUnfinishedWalk: () => Promise<void>;
+  discardUnfinishedWalk: () => Promise<void>;
 };
 
 const GameDataContext = createContext<GameData | undefined>(undefined);
@@ -65,7 +72,9 @@ const GameDataContext = createContext<GameData | undefined>(undefined);
  * session in progress). This is the data-access layer: screens read it
  * through the useDog/useInventory/useWalkSession/etc. hooks below, never
  * this file directly, so swapping any slice for a real API later doesn't
- * touch screen code.
+ * touch screen code. Walk tracking itself is already real (lib/walkTask.ts
+ * + SQLite) — only the economy around it (coins/inventory/catalogue) is
+ * still mock.
  */
 export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const [dog, setDog] = useState<DogProfile>(mockDog);
@@ -75,9 +84,14 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const [walkHistory, setWalkHistory] = useState<WalkRecord[]>(mockWalkHistory);
   const [hasOnboarded, setHasOnboarded] = useState(false);
   const [justOnboarded, setJustOnboarded] = useState(false);
+
   const [walkPhase, setWalkPhase] = useState<WalkSessionPhase>('idle');
+  const [walkId, setWalkId] = useState<string | null>(null);
   const [walkStartedAt, setWalkStartedAt] = useState<number | null>(null);
-  const [walkResult, setWalkResult] = useState<WalkResult | null>(null);
+  const [walkTrackingMode, setWalkTrackingMode] = useState<walkTask.WalkTrackingMode | null>(null);
+  const [walkSummary, setWalkSummary] = useState<WalkSummary | null>(null);
+  const [walkDrops, setWalkDrops] = useState<InventoryItem[]>([]);
+  const [unfinishedWalk, setUnfinishedWalk] = useState<UnfinishedWalk | null>(null);
 
   const updateDog = useCallback((patch: Partial<DogProfile>) => {
     setDog((prev) => ({ ...prev, ...patch }));
@@ -137,54 +151,79 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
 
   const acknowledgeFirstWalkNudge = useCallback(() => setJustOnboarded(false), []);
 
-  const startWalk = useCallback(() => {
-    if (justOnboarded) acknowledgeFirstWalkNudge();
-    setWalkStartedAt(Date.now());
-    setWalkResult(null);
-    setWalkPhase('active');
-  }, [justOnboarded, acknowledgeFirstWalkNudge]);
+  const startWalk = useCallback(
+    async (dogName: string): Promise<StartWalkOutcome> => {
+      const result = await walkTask.startWalk(dogName);
+      if (!result.ok) return { ok: false, reason: result.reason };
 
-  const endWalk = useCallback(() => {
-    const elapsedMin = walkStartedAt
-      ? Math.max(1, Math.round((Date.now() - walkStartedAt) / 60000))
-      : 5;
-    // Mock GPS-derived numbers scaled to elapsed time, not a real track.
-    // ~70-100m/min is a plausible dog-walking pace for the mock.
-    const distanceKm = Math.round(elapsedMin * (0.07 + Math.random() * 0.03) * 100) / 100;
-    const sniffSpotsHit = Math.floor(Math.random() * 4);
-    const routeNovelty: RouteNovelty = Math.random() < 0.3 ? 'new' : 'regular';
-    setWalkResult({
-      distanceKm,
-      activeMinutes: elapsedMin,
-      sniffSpotsHit,
-      routeNovelty,
-      drops: rollDrops(),
-    });
+      if (justOnboarded) acknowledgeFirstWalkNudge();
+      setWalkId(result.walkId);
+      setWalkStartedAt(result.startedAt);
+      setWalkTrackingMode(result.trackingMode);
+      setWalkSummary(null);
+      setWalkDrops([]);
+      setWalkPhase('active');
+      return { ok: true };
+    },
+    [justOnboarded, acknowledgeFirstWalkNudge],
+  );
+
+  const endWalk = useCallback(async () => {
+    if (!walkId || !walkTrackingMode) return;
+    const { summary, drops } = await walkTask.endWalk(walkId, walkTrackingMode);
+    setWalkSummary(summary);
+    setWalkDrops(drops);
     setWalkPhase('recap');
-  }, [walkStartedAt]);
+  }, [walkId, walkTrackingMode]);
 
   const beginReveal = useCallback(() => setWalkPhase('revealing'), []);
 
   const finishReveal = useCallback(() => {
-    if (walkResult) {
-      addItems(walkResult.drops);
+    if (walkSummary) {
+      addItems(walkDrops);
       addWalkRecord({
-        id: `walk-${Date.now()}`,
+        id: walkId ?? `walk-${Date.now()}`,
         dateLabel: 'Today',
-        distanceKm: walkResult.distanceKm,
-        activeMinutes: walkResult.activeMinutes,
-        sniffSpotsHit: walkResult.sniffSpotsHit,
-        itemsFound: walkResult.drops.length,
+        distanceKm: walkSummary.distanceM / 1000,
+        activeMinutes: walkSummary.activeMinutes,
+        sniffSpotsHit: walkSummary.sniffSpotsHit,
+        itemsFound: walkDrops.length,
       });
     }
     setWalkPhase('done');
-  }, [walkResult, addItems, addWalkRecord]);
+  }, [walkId, walkSummary, walkDrops, addItems, addWalkRecord]);
 
   const resetWalkSession = useCallback(() => {
     setWalkPhase('idle');
+    setWalkId(null);
     setWalkStartedAt(null);
-    setWalkResult(null);
+    setWalkTrackingMode(null);
+    setWalkSummary(null);
+    setWalkDrops([]);
   }, []);
+
+  const checkForUnfinishedWalk = useCallback(async () => {
+    const found = await walkTask.checkForUnfinishedWalk();
+    setUnfinishedWalk(found);
+  }, []);
+
+  const resumeUnfinishedWalk = useCallback(async () => {
+    if (!unfinishedWalk) return;
+    await walkTask.resumeWalk(unfinishedWalk, dog.name);
+    setWalkId(unfinishedWalk.id);
+    setWalkStartedAt(unfinishedWalk.startedAt);
+    setWalkTrackingMode(unfinishedWalk.trackingMode);
+    setWalkSummary(null);
+    setWalkDrops([]);
+    setWalkPhase('active');
+    setUnfinishedWalk(null);
+  }, [unfinishedWalk, dog.name]);
+
+  const discardUnfinishedWalk = useCallback(async () => {
+    if (!unfinishedWalk) return;
+    await walkTask.discardWalk(unfinishedWalk.id);
+    setUnfinishedWalk(null);
+  }, [unfinishedWalk]);
 
   const value: GameData = {
     dog,
@@ -205,13 +244,20 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     justOnboarded,
     acknowledgeFirstWalkNudge,
     walkPhase,
+    walkId,
     walkStartedAt,
-    walkResult,
+    walkTrackingMode,
+    walkSummary,
+    walkDrops,
     startWalk,
     endWalk,
     beginReveal,
     finishReveal,
     resetWalkSession,
+    unfinishedWalk,
+    checkForUnfinishedWalk,
+    resumeUnfinishedWalk,
+    discardUnfinishedWalk,
   };
 
   return <GameDataContext.Provider value={value}>{children}</GameDataContext.Provider>;

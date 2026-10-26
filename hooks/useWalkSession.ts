@@ -1,16 +1,8 @@
-import { useGameData } from './GameDataProvider';
-import type { InventoryItem } from '../mocks/items';
+import { useGameData, type StartWalkOutcome } from './GameDataProvider';
+import type { WalkTrackingMode } from '../lib/walkTask';
+import type { WalkSummary } from '../lib/walk/types';
 
-export type WalkSessionPhase = 'idle' | 'active' | 'recap' | 'revealing' | 'done';
-export type RouteNovelty = 'new' | 'regular';
-
-export type WalkResult = {
-  distanceKm: number;
-  activeMinutes: number;
-  sniffSpotsHit: number;
-  routeNovelty: RouteNovelty;
-  drops: InventoryItem[];
-};
+export type { StartWalkOutcome, WalkTrackingMode, WalkSummary };
 
 /**
  * Walk flow state machine: idle -> active -> recap -> revealing -> done.
@@ -19,21 +11,19 @@ export type WalkResult = {
  * separate component instance, so this state can't live in a plain
  * useState here (every screen would get its own disconnected copy).
  *
- * Real tracking is GPS, on-device, background-capable — lib/walkTask.ts is
- * the base for that (currently unused by this mock UI, wiring it in is a
- * separate task). Distance, active minutes, route, sniff spots, and
- * new-vs-regular route detection all get computed on the phone and stored
- * locally (SQLite); only a summary — distance_m, active_minutes,
- * sniff_spots_hit, route_novelty — ever reaches the server. No step
- * counting anywhere in this model. WalkResult's shape here already
- * matches that summary, just named for the mock UI (distanceKm instead of
- * distance_m, etc.) rather than wired to a real local DB yet.
+ * startWalk/endWalk delegate to lib/walkTask.ts for the real GPS
+ * tracking and SQLite persistence — see that file for how distance/
+ * active-minutes/route/sniff-spots/novelty get computed and why nothing
+ * here ever touches the network.
  */
 export function useWalkSession() {
   const {
     walkPhase: phase,
+    walkId,
     walkStartedAt: startedAt,
-    walkResult: result,
+    walkTrackingMode: trackingMode,
+    walkSummary: summary,
+    walkDrops: drops,
     startWalk,
     endWalk,
     beginReveal,
@@ -41,5 +31,18 @@ export function useWalkSession() {
     resetWalkSession: reset,
   } = useGameData();
 
-  return { phase, startedAt, result, startWalk, endWalk, beginReveal, finishReveal, reset };
+  return {
+    phase,
+    walkId,
+    startedAt,
+    trackingMode,
+    summary,
+    drops,
+    startWalk,
+    endWalk,
+    beginReveal,
+    finishReveal,
+    reset,
+  };
 }
+

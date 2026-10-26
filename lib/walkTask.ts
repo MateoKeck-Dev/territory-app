@@ -210,7 +210,7 @@ export async function startWalk(dogName: string): Promise<StartWalkResult> {
   const walkId = generateWalkId();
   const startedAt = Date.now();
   resetLiveTracking();
-  await walkDb.createWalk(walkId, startedAt);
+  await walkDb.createWalk(walkId, startedAt, permission.mode);
   setActiveWalkId(walkId);
 
   if (permission.mode === 'background') {
@@ -264,19 +264,42 @@ export async function discardWalk(walkId: string): Promise<void> {
  * Called once at app start. Finds a walk that never got an end (app was
  * killed mid-walk) — if it's already past the max-duration guard, there's
  * nothing useful to resume, so it's auto-finalized silently instead of
- * prompting. Otherwise the caller should offer resume-or-end.
+ * prompting. Otherwise the caller should offer resume-or-end; this
+ * function has no side effects on tracking either way — see resumeWalk
+ * and endWalk for those, called only once the user picks one.
  */
 export async function checkForUnfinishedWalk(): Promise<walkDb.UnfinishedWalk | null> {
   const unfinished = await walkDb.getUnfinishedWalk();
   if (!unfinished) return null;
 
   if (Date.now() - unfinished.startedAt > WALK_CONFIG.maxWalkDurationMs) {
-    await endWalk(unfinished.id, 'background').catch((err) =>
+    await endWalk(unfinished.id, unfinished.trackingMode).catch((err) =>
       console.warn('[walk] auto-end of a stale unfinished walk failed:', err),
     );
     return null;
   }
 
-  setActiveWalkId(unfinished.id);
   return unfinished;
+}
+
+/**
+ * Called when the user chooses to resume a walk checkForUnfinishedWalk
+ * found. For background mode, restarts the TaskManager task if it's not
+ * still running — a headless relaunch would have kept it going already,
+ * but a full OS-level kill of the process might not have. For foreground
+ * mode there's nothing to do here: the caller's screen starts its own
+ * watchPositionAsync on mount, identically to a fresh walk.
+ */
+export async function resumeWalk(unfinished: walkDb.UnfinishedWalk, dogName: string): Promise<void> {
+  setActiveWalkId(unfinished.id);
+  resetLiveTracking();
+
+  if (unfinished.trackingMode === 'background') {
+    const stillRunning = await Location.hasStartedLocationUpdatesAsync(WALK_LOCATION_TASK).catch(
+      () => false,
+    );
+    if (!stillRunning) {
+      await startBackgroundTracking(dogName);
+    }
+  }
 }

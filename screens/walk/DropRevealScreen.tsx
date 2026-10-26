@@ -9,10 +9,8 @@ import { useWalkSession } from '../../hooks/useWalkSession';
 import type { AppStackParamList } from '../../navigation/types';
 
 export function DropRevealScreen() {
-  const { result, finishReveal } = useWalkSession();
+  const { drops, finishReveal } = useWalkSession();
   const rootNavigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
-
-  const drops = result?.drops ?? [];
 
   function goHome() {
     finishReveal();

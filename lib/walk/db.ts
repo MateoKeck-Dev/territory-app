@@ -16,6 +16,7 @@ function getDb(): Promise<SQLite.SQLiteDatabase> {
         CREATE TABLE IF NOT EXISTS walks (
           id TEXT PRIMARY KEY,
           started_at INTEGER NOT NULL,
+          tracking_mode TEXT NOT NULL,
           ended_at INTEGER,
           distance_m REAL,
           active_minutes REAL,
@@ -44,9 +45,18 @@ function getDb(): Promise<SQLite.SQLiteDatabase> {
   return dbPromise;
 }
 
-export async function createWalk(id: string, startedAt: number): Promise<void> {
+export async function createWalk(
+  id: string,
+  startedAt: number,
+  trackingMode: 'background' | 'foreground',
+): Promise<void> {
   const db = await getDb();
-  await db.runAsync('INSERT INTO walks (id, started_at, synced) VALUES (?, ?, 0)', id, startedAt);
+  await db.runAsync(
+    'INSERT INTO walks (id, started_at, tracking_mode, synced) VALUES (?, ?, ?, 0)',
+    id,
+    startedAt,
+    trackingMode,
+  );
 }
 
 /** Points are written as they arrive (not buffered in memory) so a walk's
@@ -129,17 +139,23 @@ export async function discardWalk(walkId: string): Promise<void> {
   });
 }
 
-export type UnfinishedWalk = { id: string; startedAt: number };
+export type UnfinishedWalk = {
+  id: string;
+  startedAt: number;
+  trackingMode: 'background' | 'foreground';
+};
 
 /** At most one of these should ever exist — the app only ever starts one
  * walk at a time — but if the app was killed mid-walk, this is how the
  * next launch finds it to offer resume-or-end. */
 export async function getUnfinishedWalk(): Promise<UnfinishedWalk | null> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ id: string; started_at: number }>(
-    'SELECT id, started_at FROM walks WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1',
-  );
-  return row ? { id: row.id, startedAt: row.started_at } : null;
+  const row = await db.getFirstAsync<{
+    id: string;
+    started_at: number;
+    tracking_mode: 'background' | 'foreground';
+  }>('SELECT id, started_at, tracking_mode FROM walks WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1');
+  return row ? { id: row.id, startedAt: row.started_at, trackingMode: row.tracking_mode } : null;
 }
 
 export type StoredWalk = {
