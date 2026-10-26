@@ -11,11 +11,11 @@ export type Challenge = {
 };
 
 export const mockChallenges: Challenge[] = [
-  { id: 'ch-1', category: 'Walking', title: 'Walk 2,000 steps', progress: 0.65, reward: '15 coins', period: 'daily' },
+  { id: 'ch-1', category: 'Walking', title: 'Walk 2 km', progress: 0.65, reward: '15 coins', period: 'daily' },
   { id: 'ch-2', category: 'Walking', title: 'Go on 5 walks this week', progress: 0.4, reward: 'Rare find', period: 'weekly' },
   { id: 'ch-3', category: 'Mini games', title: 'Play Fetch 3 times', progress: 0.33, reward: '10 coins', period: 'daily' },
   { id: 'ch-4', category: 'Mini games', title: 'Try every mini game', progress: 0.25, reward: '20 coins', period: 'weekly' },
-  { id: 'ch-5', category: 'Pack', title: 'Pack walks 10,000 steps together', progress: 0.52, reward: 'Pack badge', period: 'weekly' },
+  { id: 'ch-5', category: 'Pack', title: 'Pack walks 20 km together', progress: 0.52, reward: 'Pack badge', period: 'weekly' },
   { id: 'ch-6', category: 'Pack', title: 'Visit a pack member’s house', progress: 1, reward: '5 coins', period: 'daily' },
 ];
 
@@ -58,8 +58,8 @@ export const mockLeaderboards: Record<LeaderboardKind, Record<LeaderboardScope, 
   },
   Packs: {
     Friends: board(['—', '—', '—', '—']),
-    Pack: board(['2,400 steps', '1,800 steps', '1,200 steps', '900 steps']),
-    Global: board(['88,000 steps', '1,800 steps', '81,000 steps', '76,000 steps']),
+    Pack: board(['24 km', '18 km', '12 km', '9 km']),
+    Global: board(['880 km', '18 km', '810 km', '760 km']),
   },
   'Mini games': {
     Friends: board(['18 plays', '12 plays', '9 plays', '5 plays']),

@@ -2,25 +2,25 @@ export type PackMember = {
   id: string;
   name: string;
   dogName: string;
-  stepsThisWeek: number;
+  distanceKmThisWeek: number;
 };
 
 export type Pack = {
   id: string;
   name: string;
   members: PackMember[];
-  goalSteps: number;
-  progressSteps: number;
+  goalDistanceKm: number;
+  progressDistanceKm: number;
 };
 
 export const mockPack: Pack = {
   id: 'pack-1',
   name: 'The Backyard Buddies',
   members: [
-    { id: 'me', name: 'You', dogName: 'Biscuit', stepsThisWeek: 8200 },
-    { id: 'f-1', name: 'Nora', dogName: 'Pepper', stepsThisWeek: 6100 },
-    { id: 'f-2', name: 'Theo', dogName: 'Mochi', stepsThisWeek: 4300 },
+    { id: 'me', name: 'You', dogName: 'Biscuit', distanceKmThisWeek: 8.2 },
+    { id: 'f-1', name: 'Nora', dogName: 'Pepper', distanceKmThisWeek: 6.1 },
+    { id: 'f-2', name: 'Theo', dogName: 'Mochi', distanceKmThisWeek: 4.3 },
   ],
-  goalSteps: 25000,
-  progressSteps: 18600,
+  goalDistanceKm: 25,
+  progressDistanceKm: 18.6,
 };

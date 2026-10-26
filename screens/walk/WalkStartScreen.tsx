@@ -30,7 +30,7 @@ export function WalkStartScreen({
         Ready for a walk?
       </Text>
       <Text style={{ color: colors.textMuted, fontSize: fontSizes.sm, textAlign: 'center' }}>
-        We'll count your steps the whole way. No need to check your phone —
+        We'll track the walk on your phone the whole way. No need to check it —
         pop it in your pocket and go.
       </Text>
       <Button label="Start walk" size="lg" onPress={handleStart} />

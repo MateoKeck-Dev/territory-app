@@ -15,9 +15,10 @@ function formatElapsed(totalSeconds: number): string {
 }
 
 /**
- * Deliberately minimal — glanced at, not used. Live steps/distance here are
- * a rough mock estimate for feel; the TODO in useWalkSession covers wiring
- * the real Pedometer query at End walk.
+ * Deliberately minimal — glanced at, not used. The live distance here is a
+ * rough mock estimate for feel; the real version reads it from the
+ * on-device GPS track lib/walkTask.ts is building toward, not a server
+ * round-trip — see the doc comment on useWalkSession.
  */
 export function WalkActiveScreen({
   navigation,
@@ -36,8 +37,7 @@ export function WalkActiveScreen({
     return () => clearInterval(interval);
   }, [startedAt]);
 
-  const estSteps = Math.round(elapsedSec * 2.2);
-  const estDistanceKm = Math.round(estSteps * 0.0007 * 100) / 100;
+  const estDistanceKm = Math.round(((elapsedSec / 60) * 0.08) * 100) / 100;
 
   function handleEnd() {
     endWalk();
@@ -50,19 +50,11 @@ export function WalkActiveScreen({
         {formatElapsed(elapsedSec)}
       </Text>
 
-      <View style={styles.statsRow}>
-        <View style={styles.stat}>
-          <Text style={{ color: colors.text, fontSize: fontSizes.xl, fontWeight: fontWeights.bold }}>
-            {estSteps.toLocaleString()}
-          </Text>
-          <Text style={{ color: colors.textMuted, fontSize: fontSizes.xs }}>steps</Text>
-        </View>
-        <View style={styles.stat}>
-          <Text style={{ color: colors.text, fontSize: fontSizes.xl, fontWeight: fontWeights.bold }}>
-            {estDistanceKm.toFixed(1)}
-          </Text>
-          <Text style={{ color: colors.textMuted, fontSize: fontSizes.xs }}>km</Text>
-        </View>
+      <View style={styles.stat}>
+        <Text style={{ color: colors.text, fontSize: fontSizes.xl, fontWeight: fontWeights.bold }}>
+          {estDistanceKm.toFixed(1)}
+        </Text>
+        <Text style={{ color: colors.textMuted, fontSize: fontSizes.xs }}>km</Text>
       </View>
 
       <Button label="End walk" size="lg" variant="danger" onPress={handleEnd} />
@@ -71,6 +63,5 @@ export function WalkActiveScreen({
 }
 
 const styles = StyleSheet.create({
-  statsRow: { flexDirection: 'row', gap: 40 },
   stat: { alignItems: 'center' },
 });

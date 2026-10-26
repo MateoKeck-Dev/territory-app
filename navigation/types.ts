@@ -3,7 +3,7 @@ export type OnboardingStackParamList = {
   MeetHouse: undefined;
   WelcomeGift: undefined;
   SignUp: undefined;
-  MotionPermission: undefined;
+  LocationPermission: undefined;
 };
 
 export type HomeStackParamList = {

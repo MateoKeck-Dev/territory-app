@@ -10,11 +10,18 @@
   `tsconfig.json`'s typecheck so they don't break the build, but they should
   be deleted in a follow-up — a bulk `git rm` was blocked here as a
   destructive action the agent couldn't push through.
-- **Remove `lib/walkTask.ts` and the `@rnmapbox/maps` setup** (dependency,
-  `app.json` plugin config, `ios`/`android` native bits) once confirmed
-  unneeded — walks are now measured by step count, not GPS, so the old
-  background-location machinery has no path back in. Left in place
-  deliberately for this PR, per instructions, for a separate cleanup pass.
+- **Wire `lib/walkTask.ts` up to the new local-first walk model.** Walks are
+  GPS-tracked on-device (background location, same as this file already
+  does); the correction is what happens with that data. Distance, active
+  minutes, route, sniff spots, and new-vs-regular route detection should all
+  be computed on the phone and stored locally (SQLite) as the walk happens,
+  with only a summary (`distance_m`, `active_minutes`, `sniff_spots_hit`,
+  `route_novelty`) ever synced to the server — not the current
+  `walkTask.ts` behavior of streaming raw points to `/walks/{id}/points`
+  during the walk, which assumed server-side distance/claim computation.
+  Kept in place deliberately (it's the base for this — the location
+  tracking plumbing stays, the sync model needs to change), left unused by
+  this mock UI for now.
 
 ## Onboarding
 

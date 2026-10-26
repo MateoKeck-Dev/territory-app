@@ -48,9 +48,9 @@ export function SocialScreen({
             <Text style={{ color: colors.textMuted, fontSize: fontSizes.xs }}>
               {pack.members.length} member{pack.members.length === 1 ? '' : 's'}
             </Text>
-            <ProgressBar progress={pack.progressSteps / pack.goalSteps} />
+            <ProgressBar progress={pack.progressDistanceKm / pack.goalDistanceKm} />
             <Text style={{ color: colors.textMuted, fontSize: fontSizes.xs }}>
-              {pack.progressSteps.toLocaleString()} / {pack.goalSteps.toLocaleString()} steps this week
+              {pack.progressDistanceKm.toFixed(1)} / {pack.goalDistanceKm.toFixed(0)} km this week
             </Text>
           </Card>
         ) : (

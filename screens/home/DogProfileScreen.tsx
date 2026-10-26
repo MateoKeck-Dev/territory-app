@@ -50,8 +50,8 @@ export function DogProfileScreen() {
         <Card key={walk.id} style={styles.walkRow}>
           <Text style={{ color: colors.text, fontWeight: fontWeights.bold, width: 80 }}>{walk.dateLabel}</Text>
           <Text style={{ color: colors.textMuted, fontSize: fontSizes.sm }}>
-            {walk.steps.toLocaleString()} steps · {walk.distanceKm.toFixed(1)} km · {walk.activeMinutes} min ·{' '}
-            {walk.itemsFound} found
+            {walk.distanceKm.toFixed(1)} km · {walk.activeMinutes} min · {walk.sniffSpotsHit} sniff spot
+            {walk.sniffSpotsHit === 1 ? '' : 's'} · {walk.itemsFound} found
           </Text>
         </Card>
       ))}

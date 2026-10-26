@@ -5,22 +5,28 @@ import { useGameData } from './GameDataProvider';
 
 export type WalkSessionPhase = 'idle' | 'active' | 'recap' | 'revealing' | 'done';
 
+export type RouteNovelty = 'new' | 'regular';
+
 export type WalkResult = {
-  steps: number;
   distanceKm: number;
   activeMinutes: number;
+  sniffSpotsHit: number;
+  routeNovelty: RouteNovelty;
   drops: InventoryItem[];
 };
 
 /**
  * Walk flow state machine: idle -> active -> recap -> revealing -> done.
- * Measured by steps/distance/duration only — no GPS, no routes, no map.
  *
- * TODO: once this moves off mock data, start the walk by checking
- * expo-sensors Pedometer.isAvailableAsync() and recording `startedAt`, then
- * end it with Pedometer.getStepCountAsync(startedAt, new Date()) for the
- * real step count. WalkResult's shape (steps/distanceKm/activeMinutes,
- * no coordinates) is already what that call would feed.
+ * Real tracking is GPS, on-device, background-capable — lib/walkTask.ts is
+ * the base for that (currently unused by this mock UI, wiring it in is a
+ * separate task). Distance, active minutes, route, sniff spots, and
+ * new-vs-regular route detection all get computed on the phone and stored
+ * locally (SQLite); only a summary — distance_m, active_minutes,
+ * sniff_spots_hit, route_novelty — ever reaches the server. No step
+ * counting anywhere in this model. WalkResult's shape here already
+ * matches that summary, just named for the mock UI (distanceKm instead of
+ * distance_m, etc.) rather than wired to a real local DB yet.
  */
 export function useWalkSession() {
   const { addItems, addWalkRecord, justOnboarded, acknowledgeFirstWalkNudge } = useGameData();
@@ -37,14 +43,16 @@ export function useWalkSession() {
 
   const endWalk = useCallback(() => {
     const elapsedMin = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 60000)) : 5;
-    // Mock step-counter reading — plausible numbers scaled to elapsed time,
-    // not a real sensor read. See TODO above.
-    const steps = elapsedMin * (90 + Math.floor(Math.random() * 40));
-    const distanceKm = Math.round(steps * 0.0007 * 100) / 100;
+    // Mock GPS-derived numbers scaled to elapsed time, not a real track.
+    // ~70-100m/min is a plausible dog-walking pace for the mock.
+    const distanceKm = Math.round(elapsedMin * (0.07 + Math.random() * 0.03) * 100) / 100;
+    const sniffSpotsHit = Math.floor(Math.random() * 4);
+    const routeNovelty: RouteNovelty = Math.random() < 0.3 ? 'new' : 'regular';
     const walkResult: WalkResult = {
-      steps,
       distanceKm,
       activeMinutes: elapsedMin,
+      sniffSpotsHit,
+      routeNovelty,
       drops: rollDrops(),
     };
     setResult(walkResult);
@@ -59,9 +67,9 @@ export function useWalkSession() {
       addWalkRecord({
         id: `walk-${Date.now()}`,
         dateLabel: 'Today',
-        steps: result.steps,
         distanceKm: result.distanceKm,
         activeMinutes: result.activeMinutes,
+        sniffSpotsHit: result.sniffSpotsHit,
         itemsFound: result.drops.length,
       });
     }

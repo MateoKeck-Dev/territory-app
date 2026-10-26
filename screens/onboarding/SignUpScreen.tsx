@@ -138,7 +138,7 @@ export function SignUpScreen({
         label="Continue"
         size="lg"
         disabled={!accountCreated && !alreadySignedIn}
-        onPress={() => navigation.navigate('MotionPermission')}
+        onPress={() => navigation.navigate('LocationPermission')}
       />
     </ScreenContainer>
   );

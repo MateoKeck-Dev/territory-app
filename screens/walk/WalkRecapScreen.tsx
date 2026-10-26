@@ -36,10 +36,16 @@ export function WalkRecapScreen({
 
       <PawTrail />
 
+      {result.routeNovelty === 'new' && (
+        <Text style={{ color: colors.primaryDark, fontSize: fontSizes.sm, fontWeight: fontWeights.bold }}>
+          ✨ A brand new route!
+        </Text>
+      )}
+
       <View style={styles.statsRow}>
-        <Stat label="Steps" value={result.steps.toLocaleString()} />
         <Stat label="Distance" value={`${result.distanceKm.toFixed(1)} km`} />
         <Stat label="Active" value={`${result.activeMinutes} min`} />
+        <Stat label="Sniff spots" value={String(result.sniffSpotsHit)} />
       </View>
 
       <Card style={{ backgroundColor: colors.accent, alignItems: 'center' }}>
