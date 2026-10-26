@@ -3,7 +3,6 @@ import AsyncStorage from 'expo-sqlite/kv-store';
 
 import { mockDog, type DogProfile } from '../mocks/dog';
 import { mockInventory, type InventoryItem } from '../mocks/items';
-import { mockWalkHistory, type WalkRecord } from '../mocks/walkHistory';
 import * as walkTask from '../lib/walkTask';
 import type { UnfinishedWalk } from '../lib/walk/db';
 import type { WalkSummary } from '../lib/walk/types';
@@ -29,9 +28,6 @@ type GameData = {
 
   ownedCatalogueIds: string[];
   buyCatalogueItem: (id: string) => void;
-
-  walkHistory: WalkRecord[];
-  addWalkRecord: (record: WalkRecord) => void;
 
   /** False until the persisted flag has been read once at startup — see
    * RootNavigator, which must not render the onboarding flow before this
@@ -89,7 +85,6 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const [coins, setCoins] = useState(240);
   const [inventory, setInventory] = useState<InventoryItem[]>(mockInventory);
   const [ownedCatalogueIds, setOwnedCatalogueIds] = useState<string[]>([]);
-  const [walkHistory, setWalkHistory] = useState<WalkRecord[]>(mockWalkHistory);
   const [onboardingLoaded, setOnboardingLoaded] = useState(false);
   const [hasOnboarded, setHasOnboarded] = useState(false);
   const [justOnboarded, setJustOnboarded] = useState(false);
@@ -159,10 +154,6 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     setOwnedCatalogueIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   }, []);
 
-  const addWalkRecord = useCallback((record: WalkRecord) => {
-    setWalkHistory((prev) => [record, ...prev]);
-  }, []);
-
   const completeOnboarding = useCallback(() => {
     setHasOnboarded(true);
     setJustOnboarded(true);
@@ -199,19 +190,14 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const beginReveal = useCallback(() => setWalkPhase('revealing'), []);
 
   const finishReveal = useCallback(() => {
+    // Note: the walk itself is already in SQLite — walkTask.endWalk()
+    // finalized it before this ever runs. This just settles the mock
+    // economy side (coins/inventory) on top of the real walk's drops.
     if (walkSummary) {
       addItems(walkDrops);
-      addWalkRecord({
-        id: walkId ?? `walk-${Date.now()}`,
-        dateLabel: 'Today',
-        distanceKm: walkSummary.distanceM / 1000,
-        activeMinutes: walkSummary.activeMinutes,
-        sniffSpotsHit: walkSummary.sniffSpotsHit,
-        itemsFound: walkDrops.length,
-      });
     }
     setWalkPhase('done');
-  }, [walkId, walkSummary, walkDrops, addItems, addWalkRecord]);
+  }, [walkSummary, walkDrops, addItems]);
 
   const resetWalkSession = useCallback(() => {
     setWalkPhase('idle');
@@ -257,8 +243,6 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     toggleDisplay,
     ownedCatalogueIds,
     buyCatalogueItem,
-    walkHistory,
-    addWalkRecord,
     onboardingLoaded,
     hasOnboarded,
     completeOnboarding,

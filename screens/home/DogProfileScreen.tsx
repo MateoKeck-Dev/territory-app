@@ -5,13 +5,13 @@ import { Card } from '../../components/Card';
 import { DogAvatar } from '../../components/DogAvatar';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { useDog } from '../../hooks/useDog';
-import { useGameData } from '../../hooks/GameDataProvider';
+import { useWalkHistory } from '../../hooks/useWalkHistory';
 import { useTheme } from '../../lib/theme';
 
 export function DogProfileScreen() {
   const { colors, spacing, fontSizes, fontWeights } = useTheme();
   const { dog } = useDog();
-  const { walkHistory } = useGameData();
+  const { walkHistory } = useWalkHistory();
 
   const stats: { label: string; value: string }[] = [
     { label: 'Total walks', value: String(dog.stats.totalWalks) },
@@ -46,6 +46,11 @@ export function DogProfileScreen() {
       <Text style={{ color: colors.text, fontSize: fontSizes.md, fontWeight: fontWeights.bold }}>
         Walk history
       </Text>
+      {walkHistory.length === 0 && (
+        <Text style={{ color: colors.textMuted, fontSize: fontSizes.sm }}>
+          No walks yet — take {dog.name} out to start one!
+        </Text>
+      )}
       {walkHistory.map((walk) => (
         <Card key={walk.id} style={styles.walkRow}>
           <Text style={{ color: colors.text, fontWeight: fontWeights.bold, width: 80 }}>{walk.dateLabel}</Text>
