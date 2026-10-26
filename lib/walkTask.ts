@@ -303,3 +303,31 @@ export async function resumeWalk(unfinished: walkDb.UnfinishedWalk, dogName: str
     }
   }
 }
+
+/**
+ * Dev-only: feeds a scripted array of points through the exact same
+ * ingestPoint/endWalk code a real walk uses (SQLite writes, live
+ * distance, the full computeWalkSummary pipeline, drop rolling) without
+ * requesting location permission or touching GPS at all — for testing
+ * the whole flow on a simulator or at a desk. See WalkStartScreen's
+ * dev-only buttons and lib/walk/simulatedRoutes.ts.
+ */
+export async function simulateWalk(points: GpsPoint[]): Promise<EndWalkResult> {
+  if (!__DEV__) {
+    throw new Error('simulateWalk is a dev-only tool and is not available in this build');
+  }
+  if (points.length === 0) {
+    throw new Error('simulateWalk needs at least one point');
+  }
+
+  const walkId = generateWalkId();
+  resetLiveTracking();
+  await walkDb.createWalk(walkId, points[0].timestamp, 'foreground');
+  setActiveWalkId(walkId);
+
+  for (const point of points) {
+    await ingestPoint(point);
+  }
+
+  return endWalk(walkId, 'foreground');
+}

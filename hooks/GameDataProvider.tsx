@@ -5,7 +5,7 @@ import { mockDog, type DogProfile } from '../mocks/dog';
 import { mockInventory, type InventoryItem } from '../mocks/items';
 import * as walkTask from '../lib/walkTask';
 import type { UnfinishedWalk } from '../lib/walk/db';
-import type { WalkSummary } from '../lib/walk/types';
+import type { GpsPoint, WalkSummary } from '../lib/walk/types';
 
 const HAS_ONBOARDED_KEY = 'territory.hasOnboarded';
 
@@ -56,6 +56,8 @@ type GameData = {
   walkDrops: InventoryItem[];
   startWalk: (dogName: string) => Promise<StartWalkOutcome>;
   endWalk: () => Promise<void>;
+  /** Dev-only — see lib/walk/simulatedRoutes.ts and WalkStartScreen. */
+  simulateWalk: (points: GpsPoint[]) => Promise<void>;
   beginReveal: () => void;
   finishReveal: () => void;
   resetWalkSession: () => void;
@@ -187,6 +189,18 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     setWalkPhase('recap');
   }, [walkId, walkTrackingMode]);
 
+  // Dev-only: runs a scripted route through the real pipeline and lands
+  // straight on recap — no "active" phase, since there's nothing live to
+  // show for an instantly-simulated walk. See WalkStartScreen.
+  const simulateWalk = useCallback(async (points: GpsPoint[]) => {
+    const { summary, drops } = await walkTask.simulateWalk(points);
+    setWalkId(null);
+    setWalkTrackingMode(null);
+    setWalkSummary(summary);
+    setWalkDrops(drops);
+    setWalkPhase('recap');
+  }, []);
+
   const beginReveal = useCallback(() => setWalkPhase('revealing'), []);
 
   const finishReveal = useCallback(() => {
@@ -256,6 +270,7 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     walkDrops,
     startWalk,
     endWalk,
+    simulateWalk,
     beginReveal,
     finishReveal,
     resetWalkSession,

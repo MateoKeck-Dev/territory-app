@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Text } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -7,6 +7,7 @@ import { Button } from '../../components/Button';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { useDog } from '../../hooks/useDog';
 import { useWalkSession } from '../../hooks/useWalkSession';
+import { simulatedRoutes } from '../../lib/walk/simulatedRoutes';
 import { useTheme } from '../../lib/theme';
 import type { AppStackParamList, WalkStackParamList } from '../../navigation/types';
 
@@ -15,9 +16,9 @@ export function WalkStartScreen({
 }: {
   navigation: NativeStackNavigationProp<WalkStackParamList, 'WalkStart'>;
 }) {
-  const { colors, fontSizes, fontWeights } = useTheme();
+  const { colors, spacing, radii, fontSizes, fontWeights } = useTheme();
   const { dog } = useDog();
-  const { startWalk } = useWalkSession();
+  const { startWalk, simulateWalk } = useWalkSession();
   const rootNavigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const [starting, setStarting] = useState(false);
 
@@ -42,6 +43,18 @@ export function WalkStartScreen({
     }
   }
 
+  async function handleSimulate(routeId: string) {
+    const route = simulatedRoutes.find((r) => r.id === routeId);
+    if (!route) return;
+    setStarting(true);
+    try {
+      await simulateWalk(route.points);
+      navigation.navigate('WalkRecap');
+    } finally {
+      setStarting(false);
+    }
+  }
+
   return (
     <ScreenContainer style={{ alignItems: 'center', justifyContent: 'center', gap: 20 }}>
       <Text style={{ fontSize: 64 }}>🐾</Text>
@@ -58,6 +71,28 @@ export function WalkStartScreen({
         <Button label="Start walk" size="lg" onPress={handleStart} />
       )}
       <Button label="Not now" variant="ghost" onPress={() => rootNavigation.goBack()} />
+
+      {__DEV__ && !starting && (
+        <View
+          style={[
+            styles.devPanel,
+            { borderColor: colors.border, backgroundColor: colors.surfaceAlt, borderRadius: radii.md },
+          ]}
+        >
+          <Text style={{ color: colors.textMuted, fontSize: fontSizes.xs, fontWeight: fontWeights.bold }}>
+            🧪 DEV: simulate a walk
+          </Text>
+          {simulatedRoutes.map((route) => (
+            <Pressable key={route.id} onPress={() => handleSimulate(route.id)} style={{ paddingVertical: spacing.xs }}>
+              <Text style={{ color: colors.primaryDark, fontSize: fontSizes.sm }}>{route.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
     </ScreenContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  devPanel: { borderWidth: 1, padding: 12, gap: 2, position: 'absolute', bottom: 24, width: '85%' },
+});
