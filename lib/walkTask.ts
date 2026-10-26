@@ -1,186 +1,103 @@
-import AsyncStorage from 'expo-sqlite/kv-store';
-import type * as Location from 'expo-location';
+import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
-import { uploadWalkPoints, type WalkPointInput } from './api';
-import { supabase } from './supabase';
+import { computeWalkSummary, haversineMeters } from './walk/calculations';
+import { WALK_CONFIG } from './walk/config';
+import * as walkDb from './walk/db';
+import { rollDropsForWalk } from './walk/drops';
+import type { GpsPoint, WalkSummary } from './walk/types';
+import type { InventoryItem } from '../mocks/items';
 
 export const WALK_LOCATION_TASK = 'territory-walk-location-task';
 
 /**
- * 'background' = TaskManager-backed tracking that survives the app being
- * backgrounded (needs a dev build — not available in Expo Go on iOS).
- * 'foreground' = a plain watchPositionAsync subscription, active only while
- * the live walk screen is mounted and the app is in the foreground.
+ * 'background' = TaskManager-backed tracking that keeps delivering fixes
+ * with the screen locked and the app backgrounded. Requires "Always"
+ * location authorization — see requestWalkPermissions' doc comment for
+ * why that's unavoidable here, not a shortcut we took.
+ * 'foreground' = the permission-denied/Expo-Go fallback: the caller must
+ * run its own watchPositionAsync subscription and feed points to
+ * ingestPoint itself; tracking stops the moment the app backgrounds.
  */
 export type WalkTrackingMode = 'background' | 'foreground';
 
-const ACTIVE_WALK_KEY = 'territory.activeWalkId';
-const ACTIVE_WALK_SEQ_KEY = 'territory.activeWalkSeq';
-const FLUSH_THRESHOLD = 20;
-const EARTH_RADIUS_M = 6371000;
+// ---------------------------------------------------------------------------
+// Privacy: every function in this file that touches the network is named
+// and visible above. There is none. Raw points go into appendPoints below
+// (local SQLite) and nowhere else. The only thing that will ever leave the
+// device is the WalkSummary a future task syncs — distance/active-minutes/
+// sniff-spots/route-novelty, never a coordinate.
+// ---------------------------------------------------------------------------
 
-// Module-level state, not component state: this file is imported once from
-// index.ts so TaskManager's background callback (which can run with no
-// screen mounted) and the live walk screen share the same buffer/counters.
-let pointBuffer: WalkPointInput[] = [];
-let lastPoint: { lat: number; lng: number } | null = null;
-let trackedDistanceMeters = 0;
+// ---- active walk id -------------------------------------------------------
+// Module-level, not component state: the background TaskManager callback
+// has no mounted screen to read state from. Lazily restored from the DB
+// (rather than, say, expo-sqlite/kv-store) on first use each process,
+// since "is there an unfinished walk" is already stored there as the
+// single source of truth — see walk/db.ts's getUnfinishedWalk.
+let activeWalkId: string | null = null;
+let activeWalkIdChecked = false;
 
-// Assigned once per point, here, regardless of transport — never
-// re-derived from the server — so a retried flush re-sends the same seq
-// values and the backend's ON CONFLICT (walk_id, seq) DO NOTHING can tell
-// "already got this one" from "genuinely new". Mirrored to AsyncStorage
-// (best-effort, not awaited inline) so a JS reload or a headless relaunch
-// resumes counting from where it left off instead of restarting at 0 —
-// which would otherwise make every point after the relaunch collide with
-// (and get silently dropped as a duplicate of) one already on the server.
-// null means "not loaded from storage yet this process".
-let nextSeq: number | null = null;
-
-async function nextSeqValue(): Promise<number> {
-  if (nextSeq === null) {
-    const stored = await AsyncStorage.getItem(ACTIVE_WALK_SEQ_KEY);
-    nextSeq = stored ? parseInt(stored, 10) : 0;
-  }
-  const value = nextSeq;
-  nextSeq += 1;
-  AsyncStorage.setItem(ACTIVE_WALK_SEQ_KEY, String(nextSeq)).catch(() => {});
-  return value;
+async function resolveActiveWalkId(): Promise<string | null> {
+  if (activeWalkId !== null || activeWalkIdChecked) return activeWalkId;
+  activeWalkIdChecked = true;
+  const unfinished = await walkDb.getUnfinishedWalk();
+  activeWalkId = unfinished?.id ?? null;
+  return activeWalkId;
 }
 
-function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const sinLat = Math.sin(dLat / 2);
-  const sinLng = Math.sin(dLng / 2);
-  const h =
-    sinLat * sinLat + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinLng * sinLng;
-  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+function setActiveWalkId(id: string | null) {
+  activeWalkId = id;
+  activeWalkIdChecked = true;
 }
 
-async function recordPoint(point: Omit<WalkPointInput, 'seq'>) {
-  const seq = await nextSeqValue();
-  const withSeq: WalkPointInput = { ...point, seq };
-  pointBuffer.push(withSeq);
-  if (lastPoint) {
-    trackedDistanceMeters += haversineMeters(lastPoint, withSeq);
-  }
-  lastPoint = { lat: withSeq.lat, lng: withSeq.lng };
+// ---- live distance preview ------------------------------------------------
+// A cheap, incremental echo of computeDistanceMeters' filtering (accuracy,
+// implausible jumps, jitter floor) applied point-by-point, purely so
+// WalkActiveScreen has something to show while the walk is in progress.
+// Not the source of truth — computeWalkSummary re-derives everything from
+// the stored raw points when the walk ends.
+let lastAcceptedPoint: GpsPoint | null = null;
+let liveDistanceMeters = 0;
+
+export function getLiveDistanceMeters(): number {
+  return liveDistanceMeters;
 }
 
-/**
- * Shared entry point for a single GPS fix, used by both the background
- * TaskManager task below and a foreground `watchPositionAsync` subscription
- * (the Expo Go fallback, started from LiveWalkScreen). Same buffering/flush
- * behavior either way — the transport delivering points doesn't matter.
- * Callers don't supply `seq`; it's assigned here, once, in capture order.
- */
-export async function ingestPoint(point: Omit<WalkPointInput, 'seq'>): Promise<void> {
-  await recordPoint(point);
-  if (pointBuffer.length >= FLUSH_THRESHOLD) {
-    await flushBufferedPoints();
-  }
+export function resetLiveTracking(): void {
+  lastAcceptedPoint = null;
+  liveDistanceMeters = 0;
 }
 
-export function getTrackedDistanceMeters(): number {
-  return trackedDistanceMeters;
-}
+function updateLiveDistance(point: GpsPoint, config = WALK_CONFIG) {
+  if (point.accuracy != null && point.accuracy > config.maxAcceptableAccuracyMeters) return;
 
-/** Call when starting a fresh walk and once after it ends. */
-export function resetWalkTracking() {
-  pointBuffer = [];
-  lastPoint = null;
-  trackedDistanceMeters = 0;
-  nextSeq = 0;
-  AsyncStorage.setItem(ACTIVE_WALK_SEQ_KEY, '0').catch(() => {});
-}
-
-export async function setActiveWalkId(walkId: string | null) {
-  if (walkId) {
-    await AsyncStorage.setItem(ACTIVE_WALK_KEY, walkId);
-  } else {
-    await AsyncStorage.removeItem(ACTIVE_WALK_KEY);
-  }
-}
-
-async function getActiveWalkId(): Promise<string | null> {
-  return AsyncStorage.getItem(ACTIVE_WALK_KEY);
-}
-
-/** One attempt to send everything currently buffered. Throws on failure,
- * after putting the points back so nothing already captured is lost. */
-async function flushOnce(): Promise<void> {
-  const walkId = await getActiveWalkId();
-  if (!walkId) {
-    pointBuffer = [];
-    return;
-  }
-
-  const toSend = pointBuffer;
-  pointBuffer = [];
-  try {
-    // Re-fetch the session token fresh each time (rather than caching it)
-    // so this still works if the background task's JS context was
-    // relaunched headless and lost any in-memory token.
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
-    if (!token) throw new Error('no active session');
-    await uploadWalkPoints(token, walkId, toSend);
-  } catch (err) {
-    pointBuffer = [...toSend, ...pointBuffer];
-    throw err;
-  }
-}
-
-// Tracks the in-flight flush, if any, as a promise rather than a boolean —
-// set synchronously (before any await) so two calls arriving back-to-back
-// can't both see "nothing in flight" and both start sending, which would
-// race on reading/clearing pointBuffer.
-let inFlight: Promise<void> | null = null;
-
-/** Best-effort flush for the capture path: coalesces concurrent calls onto
- * one in-flight attempt, and never throws (logs and leaves points in the
- * buffer for the next flush to retry). */
-export function flushBufferedPoints(): Promise<void> {
-  if (inFlight) return inFlight;
-  if (pointBuffer.length === 0) return Promise.resolve();
-
-  inFlight = flushOnce()
-    .catch((err) => {
-      console.warn('[walk] failed to flush points, will retry:', err);
-    })
-    .finally(() => {
-      inFlight = null;
-    });
-  return inFlight;
-}
-
-/**
- * Used only when ending a walk: waits out any in-flight flush, then keeps
- * retrying until the buffer is genuinely empty. Throws (without touching
- * the buffer) if it can't get there — callers must not proceed to
- * resetWalkTracking()/discard state on a throw, or unsent points are lost.
- */
-export async function drainBufferedPoints(): Promise<void> {
-  if (inFlight) {
-    await inFlight;
-  }
-
-  const maxAttempts = 5;
-  for (let attempt = 1; pointBuffer.length > 0 && attempt <= maxAttempts; attempt++) {
-    try {
-      await flushOnce();
-    } catch (err) {
-      if (attempt === maxAttempts) {
-        throw err instanceof Error
-          ? err
-          : new Error('Could not send all walk points — check your connection and try again.');
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+  if (lastAcceptedPoint) {
+    const dtSec = (point.timestamp - lastAcceptedPoint.timestamp) / 1000;
+    if (dtSec <= 0) return;
+    const distM = haversineMeters(lastAcceptedPoint, point);
+    const speedKmh = (distM / dtSec) * 3.6;
+    if (speedKmh > config.maxPlausibleSpeedKmh) return; // glitch — don't move lastAcceptedPoint either
+    if (distM >= config.jitterRadiusMeters) {
+      liveDistanceMeters += distM;
     }
   }
+  lastAcceptedPoint = point;
+}
+
+// ---- point ingestion --------------------------------------------------
+/**
+ * Shared entry point for a single GPS fix, used by the background
+ * TaskManager task below, a foreground watchPositionAsync subscription
+ * (the permission-denied/Expo Go fallback), and the dev-only simulated
+ * walk. Writes straight to local SQLite — never buffered for a network
+ * call, there is no such call in this file.
+ */
+export async function ingestPoint(point: GpsPoint): Promise<void> {
+  const walkId = await resolveActiveWalkId();
+  if (!walkId) return; // no active walk — nothing to attach this point to
+  updateLiveDistance(point);
+  await walkDb.appendPoints(walkId, [point]);
 }
 
 type LocationTaskData = { locations: Location.LocationObject[] };
@@ -190,11 +107,176 @@ TaskManager.defineTask<LocationTaskData>(WALK_LOCATION_TASK, async ({ data, erro
     console.warn('[walk] location task error:', error.message);
     return;
   }
+  const walkId = await resolveActiveWalkId();
+  if (!walkId) return;
+
   for (const loc of data?.locations ?? []) {
     await ingestPoint({
       lat: loc.coords.latitude,
       lng: loc.coords.longitude,
-      recorded_at: new Date(loc.timestamp).toISOString(),
+      timestamp: loc.timestamp,
+      accuracy: loc.coords.accuracy ?? null,
     });
   }
+
+  // Safety net for the purely-backgrounded case: if the app never comes
+  // back to the foreground (so nothing else is checking elapsed time),
+  // this callback is still the one place guaranteed to run periodically
+  // while tracking is active. Auto-end rather than track indefinitely.
+  const unfinished = await walkDb.getUnfinishedWalk();
+  if (unfinished && Date.now() - unfinished.startedAt > WALK_CONFIG.maxWalkDurationMs) {
+    await endWalk(unfinished.id, 'background').catch((err) =>
+      console.warn('[walk] auto-end after max duration failed:', err),
+    );
+  }
 });
+
+// ---- permissions ------------------------------------------------------
+export type PermissionResult =
+  | { granted: true; mode: WalkTrackingMode }
+  | { granted: false; mode: null };
+
+/**
+ * "Always" is genuinely required here, not a default we reached for:
+ * expo-location's background task (startLocationUpdatesAsync) sets
+ * CLLocationManager.allowsBackgroundLocationUpdates = true unconditionally
+ * on iOS, and that flag only functions with "Always" authorization —
+ * with only "When In Use", iOS simply stops delivering fixes once the
+ * screen locks or the app backgrounds, confirmed against expo-location's
+ * own native source (ios/TaskConsumers/EXLocationTaskConsumer.m) and
+ * docs. There's no "When In Use" + active-session trick available
+ * through expo-location's JS API that avoids this — it would need custom
+ * native code. So: request "When In Use" first (always required as the
+ * first step on iOS), then "Always"; if "Always" is refused, fall back to
+ * foreground-only tracking rather than failing outright.
+ *
+ * Android has no equivalent problem: a foreground service (visible
+ * notification, started in startBackgroundTracking below) keeps location
+ * flowing in the background without needing the scarier
+ * ACCESS_BACKGROUND_LOCATION permission at all — see app.json, which
+ * deliberately does not request it.
+ */
+export async function requestWalkPermissions(): Promise<PermissionResult> {
+  const foreground = await Location.requestForegroundPermissionsAsync();
+  if (foreground.status !== 'granted') return { granted: false, mode: null };
+
+  try {
+    const background = await Location.requestBackgroundPermissionsAsync();
+    if (background.status === 'granted') return { granted: true, mode: 'background' };
+  } catch (err) {
+    console.warn('[walk] background permission request failed, using foreground-only:', err);
+  }
+  return { granted: true, mode: 'foreground' };
+}
+
+// ---- background tracking lifecycle ------------------------------------
+export async function startBackgroundTracking(dogName: string): Promise<void> {
+  await Location.startLocationUpdatesAsync(WALK_LOCATION_TASK, {
+    accuracy: Location.Accuracy.Balanced,
+    activityType: Location.ActivityType.Fitness,
+    // Meters/milliseconds chosen for a walking pace at reasonable battery
+    // cost: a dog walk rarely benefits from a fix more often than this.
+    timeInterval: 10000,
+    distanceInterval: 15,
+    pausesUpdatesAutomatically: false,
+    showsBackgroundLocationIndicator: true,
+    foregroundService: {
+      notificationTitle: 'Territory',
+      notificationBody: `Walking with ${dogName}`,
+    },
+  });
+}
+
+export async function stopBackgroundTracking(): Promise<void> {
+  const started = await Location.hasStartedLocationUpdatesAsync(WALK_LOCATION_TASK).catch(() => false);
+  if (started) {
+    await Location.stopLocationUpdatesAsync(WALK_LOCATION_TASK);
+  }
+}
+
+// ---- walk session orchestration ----------------------------------------
+function generateWalkId(): string {
+  return `walk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export type StartWalkResult =
+  | { ok: true; walkId: string; startedAt: number; trackingMode: WalkTrackingMode }
+  | { ok: false; reason: 'permission_denied' };
+
+export async function startWalk(dogName: string): Promise<StartWalkResult> {
+  const permission = await requestWalkPermissions();
+  if (!permission.granted) return { ok: false, reason: 'permission_denied' };
+
+  const walkId = generateWalkId();
+  const startedAt = Date.now();
+  resetLiveTracking();
+  await walkDb.createWalk(walkId, startedAt);
+  setActiveWalkId(walkId);
+
+  if (permission.mode === 'background') {
+    await startBackgroundTracking(dogName);
+  }
+  // Foreground mode: the caller (HomeScreen) is responsible for starting
+  // its own watchPositionAsync subscription and calling ingestPoint.
+
+  return { ok: true, walkId, startedAt, trackingMode: permission.mode };
+}
+
+export type EndWalkResult = { summary: WalkSummary; drops: InventoryItem[] };
+
+export async function endWalk(walkId: string, trackingMode: WalkTrackingMode): Promise<EndWalkResult> {
+  if (trackingMode === 'background') {
+    await stopBackgroundTracking().catch((err) =>
+      console.warn('[walk] failed to stop background tracking:', err),
+    );
+  }
+
+  const rawPoints = await walkDb.getWalkPoints(walkId);
+  const summary = computeWalkSummary(rawPoints, WALK_CONFIG);
+  const drops = summary.meaningful ? rollDropsForWalk(summary, WALK_CONFIG) : [];
+  const endedAt = Date.now();
+
+  await walkDb.finalizeWalk(walkId, {
+    endedAt,
+    distanceM: summary.distanceM,
+    activeMinutes: summary.activeMinutes,
+    sniffSpotsHit: summary.sniffSpotsHit,
+    routeNovelty: summary.routeNovelty,
+    simplifiedRoute: summary.simplifiedRoute,
+    drops,
+    meaningful: summary.meaningful,
+  });
+
+  setActiveWalkId(null);
+  resetLiveTracking();
+
+  return { summary, drops };
+}
+
+export async function discardWalk(walkId: string): Promise<void> {
+  await stopBackgroundTracking().catch(() => {});
+  await walkDb.discardWalk(walkId);
+  setActiveWalkId(null);
+  resetLiveTracking();
+}
+
+/**
+ * Called once at app start. Finds a walk that never got an end (app was
+ * killed mid-walk) — if it's already past the max-duration guard, there's
+ * nothing useful to resume, so it's auto-finalized silently instead of
+ * prompting. Otherwise the caller should offer resume-or-end.
+ */
+export async function checkForUnfinishedWalk(): Promise<walkDb.UnfinishedWalk | null> {
+  const unfinished = await walkDb.getUnfinishedWalk();
+  if (!unfinished) return null;
+
+  if (Date.now() - unfinished.startedAt > WALK_CONFIG.maxWalkDurationMs) {
+    await endWalk(unfinished.id, 'background').catch((err) =>
+      console.warn('[walk] auto-end of a stale unfinished walk failed:', err),
+    );
+    return null;
+  }
+
+  setActiveWalkId(unfinished.id);
+  return unfinished;
+}
