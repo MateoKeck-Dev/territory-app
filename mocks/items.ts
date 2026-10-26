@@ -41,10 +41,11 @@ const dropPool: DropTemplate[] = [
   { assetKey: 'drop-pumpkin', name: 'Pumpkin', rarity: 'seasonal', coinValue: 30 },
 ];
 
-/** Rolls `count` random drops (1-3 if not specified) — used by both the
- * walk flow and onboarding's welcome gift, so both go through one place. */
-export function rollDrops(count?: number): InventoryItem[] {
-  const n = count ?? 1 + Math.floor(Math.random() * 3);
+/** Rolls exactly `count` random drops — used by onboarding's welcome gift
+ * directly, and by lib/walk/drops.ts's rollDropsForWalk (which decides
+ * `count` from the walk summary) for real walks. */
+export function rollDrops(count: number): InventoryItem[] {
+  const n = Math.max(0, count);
   return Array.from({ length: n }, (_, i) => {
     const template = dropPool[Math.floor(Math.random() * dropPool.length)];
     return {
