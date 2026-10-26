@@ -1,4 +1,5 @@
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import AsyncStorage from 'expo-sqlite/kv-store';
 
 import { mockDog, type DogProfile } from '../mocks/dog';
 import { mockInventory, type InventoryItem } from '../mocks/items';
@@ -6,6 +7,8 @@ import { mockWalkHistory, type WalkRecord } from '../mocks/walkHistory';
 import * as walkTask from '../lib/walkTask';
 import type { UnfinishedWalk } from '../lib/walk/db';
 import type { WalkSummary } from '../lib/walk/types';
+
+const HAS_ONBOARDED_KEY = 'territory.hasOnboarded';
 
 type WalkSessionPhase = 'idle' | 'active' | 'recap' | 'revealing' | 'done';
 
@@ -30,6 +33,11 @@ type GameData = {
   walkHistory: WalkRecord[];
   addWalkRecord: (record: WalkRecord) => void;
 
+  /** False until the persisted flag has been read once at startup — see
+   * RootNavigator, which must not render the onboarding flow before this
+   * is true, or a real app restart (not just a reload) would flash
+   * onboarding at an already-onboarded user for a frame. */
+  onboardingLoaded: boolean;
   hasOnboarded: boolean;
   completeOnboarding: () => void;
   /** True only right after onboarding finishes, so Home can show a
@@ -82,8 +90,19 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const [inventory, setInventory] = useState<InventoryItem[]>(mockInventory);
   const [ownedCatalogueIds, setOwnedCatalogueIds] = useState<string[]>([]);
   const [walkHistory, setWalkHistory] = useState<WalkRecord[]>(mockWalkHistory);
+  const [onboardingLoaded, setOnboardingLoaded] = useState(false);
   const [hasOnboarded, setHasOnboarded] = useState(false);
   const [justOnboarded, setJustOnboarded] = useState(false);
+
+  // Persisted (not just in-memory) so that killing the app mid-walk and
+  // relaunching lands back in the main app — where UnfinishedWalkGate can
+  // offer resume-or-end — rather than back at onboarding, which would
+  // make that flow unreachable after a real restart.
+  useEffect(() => {
+    AsyncStorage.getItem(HAS_ONBOARDED_KEY)
+      .then((value) => setHasOnboarded(value === '1'))
+      .finally(() => setOnboardingLoaded(true));
+  }, []);
 
   const [walkPhase, setWalkPhase] = useState<WalkSessionPhase>('idle');
   const [walkId, setWalkId] = useState<string | null>(null);
@@ -147,6 +166,7 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
   const completeOnboarding = useCallback(() => {
     setHasOnboarded(true);
     setJustOnboarded(true);
+    AsyncStorage.setItem(HAS_ONBOARDED_KEY, '1').catch(() => {});
   }, []);
 
   const acknowledgeFirstWalkNudge = useCallback(() => setJustOnboarded(false), []);
@@ -239,6 +259,7 @@ export function GameDataProvider({ children }: { children: React.ReactNode }) {
     buyCatalogueItem,
     walkHistory,
     addWalkRecord,
+    onboardingLoaded,
     hasOnboarded,
     completeOnboarding,
     justOnboarded,

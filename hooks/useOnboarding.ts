@@ -4,6 +4,7 @@ import { useGameData } from './GameDataProvider';
  * RootNavigator (gating) and HomeScreen (the one-time first-walk nudge)
  * see the same state. */
 export function useOnboarding() {
-  const { hasOnboarded, completeOnboarding, justOnboarded, acknowledgeFirstWalkNudge } = useGameData();
-  return { hasOnboarded, completeOnboarding, justOnboarded, acknowledgeFirstWalkNudge };
+  const { onboardingLoaded, hasOnboarded, completeOnboarding, justOnboarded, acknowledgeFirstWalkNudge } =
+    useGameData();
+  return { onboardingLoaded, hasOnboarded, completeOnboarding, justOnboarded, acknowledgeFirstWalkNudge };
 }

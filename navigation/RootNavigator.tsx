@@ -15,7 +15,7 @@ import { useTheme } from '../lib/theme';
  */
 export function RootNavigator() {
   const { scheme, colors } = useTheme();
-  const { hasOnboarded } = useOnboarding();
+  const { onboardingLoaded, hasOnboarded } = useOnboarding();
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const navigationTheme = {
     ...base,
@@ -28,6 +28,8 @@ export function RootNavigator() {
       primary: colors.primary,
     },
   };
+
+  if (!onboardingLoaded) return null; // brief splash gap while the persisted flag loads
 
   return (
     <NavigationContainer theme={navigationTheme}>
