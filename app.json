@@ -34,7 +34,8 @@
           "locationWhenInUsePermission": "We track your walk on your phone to measure distance and find sniff spots. Your route stays on your device and is never sent to our servers — only a summary is.",
           "locationAlwaysPermission": "We track your walk on your phone, even in the background, to measure distance and find sniff spots. Your route stays on your device and is never sent to our servers — only a summary is.",
           "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": true
         }
       ]
     ]
